@@ -6,16 +6,18 @@ const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const authCheckRoutes = require("./routes/authCheckRoutes");
 const userRoutes = require('./routes/userRoutes')
-const chatRoutes = require('./routes/chatRoutes')
 const path = require("path");
 const cookieParser = require("cookie-parser");
+
 const http = require("http");
 const { Server } = require("socket.io");
+const webPush = require("web-push");
 
 
 
-dotenv.config();
+
 const app = express();
+dotenv.config();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
@@ -24,14 +26,18 @@ const io = new Server(server, {
       credentials: true,
     },
   });
+  const chatRoutes = require('./routes/chatRoutes')(io);
 
-app.use(cors());
+  const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+  const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+
+app.use(cors()); 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
-app.use("/api/posts", postRoutes);
+app.use("/api/posts", postRoutes(io));
 app.use("/api/auth-check", authCheckRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/messages", chatRoutes);
@@ -39,31 +45,128 @@ app.use("/api/messages", chatRoutes);
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-let onlineUsers = {}; // Store online users with socket IDs
+
+
+webPush.setVapidDetails(
+  "mailto:ab791235@gmail.com",
+  VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY
+);
+
+function sendWebPushNotification(userId, message) {
+  const subscription = userSubscriptions[userId];
+  if (!subscription) return;
+
+  const payload = JSON.stringify({
+    title: "New Message",
+    body: message,
+    icon: "/icon.png",
+  });
+
+  webPush.sendNotification(subscription, payload).catch(err => console.error(err));
+}
+
+
+let userSubscriptions = {}; // Store subscriptions in memory (use DB for production)
+
+app.post("/subscribe", (req, res) => {
+  const { userId, subscription } = req.body;
+  userSubscriptions[userId] = subscription;
+  res.json({ success: true });
+});
+
+
+
+
+global.onlineUsers = {};
+
+
 
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
-
-  socket.on("join", (userData) => {
-    onlineUsers[userData.userId] = socket.id;
-    io.emit("onlineUsers", Object.keys(onlineUsers));
+  socket.on("userConnected", (userId) => {
+      if (userId) {
+          global.onlineUsers[userId] = socket.id;
+      }
   });
 
-  socket.on("sendMessage", (msgData) => {
-    const { sender_id, receiver_id, message } = msgData;
-    const receiverSocket = onlineUsers[receiver_id];
+  socket.on("new_comment", (comment) => {
+    io.emit("new_comment", comment);  // Broadcast to all users
+});
 
-    // Store in database
-    // const sql = "INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)";
-    // db.query(sql, [sender_id, receiver_id, message], (err) => {
-    //   if (err) console.error("Database error:", err);
-    // });
 
-    // Send message in real-time if the receiver is online
-    if (receiverSocket) {
-      io.to(receiverSocket).emit("privateMessage", msgData);
-    }
+socket.on("like_comment", ({ comment_id }) => {
+  const sql = "SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?";
+  
+  db.query(sql, [comment_id], (err, result) => {
+      if (err) {
+          console.error("Error fetching likes:", err);
+          return;
+      }
+      
+      const new_likes = result[0].like_count; 
+
+      io.emit("comment_liked", { comment_id, new_likes });
   });
+});
+
+
+
+
+  socket.on("pin_comment", ({ comment_id,pinned }) => {
+    
+        io.emit("comment_pinned", { comment_id,pinned });
+    });
+
+
+
+
+  socket.on("disconnect", () => {
+      Object.keys(global.onlineUsers).forEach((key) => {
+          if (global.onlineUsers[key] === socket.id) {
+              delete global.onlineUsers[key];
+          }
+      });
+  });
+
+
+  socket.on("sendMessage", async (data) => {
+    const { sender_id, receiver_id, message_id, message } = data;
+
+    
+
+        // Send message to recipient if they are online
+        if (onlineUsers[receiver_id]) {
+          io.to(onlineUsers[receiver_id]).emit("privateMessage", { message_id, sender_id, receiver_id, message, status: "delivered" });
+  
+          // Update status to "delivered" in DB
+          const updateSql = "UPDATE messages SET status = ? WHERE id = ?";
+          db.query(updateSql, ["delivered", message_id]);
+          sendWebPushNotification(sender_id,message)
+      }
+
+        // Notify sender that the message is sent
+        io.to(onlineUsers[sender_id]).emit("messageStatus", { message_id, status: "sent" });
+    });
+
+
+
+socket.on("markAsRead", (data) => {
+  const { sender_id, receiver_id } = data;
+
+  const sql = "UPDATE messages SET status = ? WHERE sender_id = ? AND receiver_id = ? AND status != ?";
+  db.query(sql, ["read", sender_id, receiver_id, "read"], (err, result) => {
+      if (err) {
+          console.error("Error updating message status:", err);
+          return;
+      }
+
+      // Notify sender that messages are read
+      if (onlineUsers[sender_id]) {
+          io.to(onlineUsers[sender_id]).emit("messageRead", { sender_id, receiver_id });
+      }
+  });
+});
+
 
   socket.on("disconnect", () => {
     for (let userId in onlineUsers) {
@@ -76,6 +179,12 @@ io.on("connection", (socket) => {
     console.log("User disconnected:", socket.id);
   });
 });
+
+
+
+
+
+
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`)); 

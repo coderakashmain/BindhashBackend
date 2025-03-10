@@ -13,7 +13,7 @@ router.get("/check", authMiddleware, (req, res) => {
     return res.status(401).json({ authenticated: false, message: "No token found" });
   }
   
-  console.log("Authenticated User:", req.user);
+
   const userid = req.user.id;
 
   // Corrected SQL query
@@ -26,7 +26,7 @@ router.get("/check", authMiddleware, (req, res) => {
     
     if (results.length > 0) {
       const user = results[0];
-      console.log("Fetched User:", user);
+      
 
       return res.json({ authenticated: true, user });
     } else {
