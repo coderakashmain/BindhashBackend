@@ -30,8 +30,22 @@ const postStorage = new CloudinaryStorage({
     ],
   },
 });
+const pollStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => ({
+    folder: "poll_images",
+    allowed_formats: ["jpg", "jpeg", "png"],
+    transformation: [
+      { width: 800, height: 800, crop: "limit" }, 
+      { quality: "auto:good" }, 
+    ],
+    public_id: `poll_option_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+  }),
+});
+
 
 const profileUpload = multer({ storage: profileStorage });
 const postUpload = multer({ storage: postStorage });
+const pollUpload = multer({ storage: pollStorage });
 
-module.exports = { profileUpload, postUpload };
+module.exports = { profileUpload, postUpload,pollUpload };

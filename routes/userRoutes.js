@@ -16,53 +16,65 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const { userId } = req.query; // Get logged-in user ID
 
-  const sql = "SELECT id, username ,profile_pic FROM users WHERE id != ?";
-  db.query(sql, [userId], (err, result) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
-    res.json(result);
-  });
+  try {
+    const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
+    
+    const [results] = await db.query(sql, [userId]); // Use promise-based query
+    
+    res.json(results); // No need for `[0]`, as `results` is already an array
+  } catch (err) {
+    console.error("Database query error:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.get("/userlist", (req, res) => {
+
+router.get("/userlist", async (req, res) => {
   const { userId } = req.query; // Get logged-in user ID
 
   if (!userId) {
     return res.status(400).json({ error: "User ID is required" });
   }
 
-  const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
-
-  db.query(sql, [userId], (err, result) => {
-    if (err) {
-      console.error("Database query error:", err); // Log error properly
-      return res.status(500).json({ error: "Database error" });
-    }
-
-    res.json(result);
-  });
+  try {
+    const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
+    
+    const [result] = await db.query(sql, [userId]); // Use promise-based query
+    
+    res.json(result); // Return the result array
+  } catch (err) {
+    console.error("Database query error:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.get("/chat", (req, res) => {
+
+router.get("/chat", async (req, res) => {
   const { userId } = req.query;
 
-  const sql = "SELECT id, username, profile_pic FROM users WHERE id = ?";
-  db.query(sql, [userId], (err, result) => {
-    if (err) {
-      return res.status(500).json({ error: "Database error" });
-    }
+  if (!userId) {
+    return res.status(400).json({ error: "User ID is required" });
+  }
+
+  try {
+    const sql = "SELECT id, username, profile_pic FROM users WHERE id = ?";
+    const [result] = await db.query(sql, [userId]);
+
     res.json(result);
-  });
+  } catch (err) {
+    console.error("Database query error:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
 });
+
 
 router.post(
   "/upload-profile",
   profileUpload.single("profile_pic"),
-  (req, res) => {
+  async (req, res) => {
     const { userid } = req.body;
 
     if (!req.file) {
@@ -71,38 +83,43 @@ router.post(
 
     const profilePicPath = req.file.path;
 
-    const sqlGetOldImage = "SELECT profile_pic FROM users WHERE id = ?";
-    db.query(sqlGetOldImage, [userid], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
+    try {
+      // Fetch the old profile picture
+      const sqlGetOldImage = "SELECT profile_pic FROM users WHERE id = ?";
+      const [result] = await db.query(sqlGetOldImage, [userid]);
 
       if (result.length > 0 && result[0].profile_pic) {
         const oldImageUrl = result[0].profile_pic;
-
         const parts = oldImageUrl.split("/").slice(-2).join("/"); 
         const publicId = parts.substring(0, parts.lastIndexOf("."));
 
-        cloudinary.uploader.destroy(publicId, (error, result) => {
-          if (error) console.log("Cloudinary delete error:", error);
-      
-        });
+        try {
+          await cloudinary.uploader.destroy(publicId);
+        } catch (cloudinaryError) {
+          console.error("Cloudinary delete error:", cloudinaryError);
+        }
       }
 
-      const sql = "UPDATE users SET profile_pic = ? WHERE id = ?";
-      db.query(sql, [profilePicPath, userid], (err) => {
-        if (err) {
-          console.log(err);
+      // Update the new profile picture
+      const sqlUpdate = "UPDATE users SET profile_pic = ? WHERE id = ?";
+      await db.query(sqlUpdate, [profilePicPath, userid]);
 
-          return res.status(500).json({ error: "Database error" });
-        }
+      res.json({ profile_pic: profilePicPath });
 
-        res.json({ profile_pic: profilePicPath });
-      });
-    });
+    } catch (error) {
+      console.error("Database or Cloudinary error:", error);
+      return res.status(500).json({ error: "Internal Server Error" });
+    }
   }
 );
 
-router.get("/followers-count", (req, res) => {
-  const userId = req.query.userId;
+
+router.get("/followers-count", async (req, res) => {
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({ error: "User ID is required" });
+  }
 
   const sql = `
     SELECT 
@@ -110,14 +127,22 @@ router.get("/followers-count", (req, res) => {
       (SELECT COUNT(*) FROM followers WHERE follower_id = ?) AS following_count
   `;
 
-  db.query(sql, [userId, userId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [results] = await db.query(sql, [userId, userId]);
     res.json(results[0]);
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.post("/follow", (req, res) => {
+
+router.post("/follow", async (req, res) => {
   const { followerId, followingId } = req.body;
+
+  if (!followerId || !followingId) {
+    return res.status(400).json({ error: "Both followerId and followingId are required" });
+  }
 
   if (followerId === followingId) {
     return res.status(400).json({ error: "You can't follow yourself!" });
@@ -125,46 +150,71 @@ router.post("/follow", (req, res) => {
 
   const sql = `INSERT IGNORE INTO followers (follower_id, following_id) VALUES (?, ?)`;
 
-  db.query(sql, [followerId, followingId], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [result] = await db.query(sql, [followerId, followingId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(400).json({ error: "Already following this user" });
+    }
+
     res.json({ message: "Followed successfully!" });
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.post("/unfollow", (req, res) => {
+
+router.post("/unfollow", async (req, res) => {
   const { followerId, followingId } = req.body;
+
+  if (!followerId || !followingId) {
+    return res.status(400).json({ error: "Both followerId and followingId are required" });
+  }
 
   const sql = `DELETE FROM followers WHERE follower_id = ? AND following_id = ?`;
 
-  db.query(sql, [followerId, followingId], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [result] = await db.query(sql, [followerId, followingId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(400).json({ error: "You are not following this user" });
+    }
+
     res.json({ message: "Unfollowed successfully!" });
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.get("/is-following", (req, res) => {
+
+router.get("/is-following", async (req, res) => {
   const { followerId, followingId } = req.query;
 
   if (!followerId || !followingId) {
-    return res
-      .status(400)
-      .json({ error: "Both followerId and followingId are required" });
+    return res.status(400).json({ error: "Both followerId and followingId are required" });
   }
 
-  const sql =
-    "SELECT * FROM followers WHERE follower_id = ? AND following_id = ?";
+  const sql = "SELECT 1 FROM followers WHERE follower_id = ? AND following_id = ? LIMIT 1";
 
-  db.query(sql, [followerId, followingId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [results] = await db.query(sql, [followerId, followingId]);
 
     res.json({ isFollowing: results.length > 0 });
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.get("/suggested-users", (req, res) => {
+
+router.get("/suggested-users", async (req, res) => {
   const { userId } = req.query;
 
-  if (!userId) return res.status(400).json({ error: "User ID is required" });
+  if (!userId) {
+    return res.status(400).json({ error: "User ID is required" });
+  }
 
   const sql = `
     WITH UserFollowers AS (
@@ -176,7 +226,7 @@ router.get("/suggested-users", (req, res) => {
         JOIN followers f ON u.id = f.follower_id
         WHERE f.following_id IN (SELECT following_id FROM UserFollowers)
           AND u.id != ?
-          AND u.id NOT IN (SELECT following_id FROM UserFollowers) -- Exclude already followed users
+          AND u.id NOT IN (SELECT following_id FROM UserFollowers)
         GROUP BY u.id
         ORDER BY mutual_count DESC
         LIMIT 5
@@ -184,19 +234,24 @@ router.get("/suggested-users", (req, res) => {
     SELECT * FROM Mutuals
     UNION
     SELECT id, username, profile_pic, 0 AS mutual_count FROM users
-    WHERE id != ? 
+    WHERE id != ?
       AND id NOT IN (SELECT following_id FROM UserFollowers)
+      AND id NOT IN (SELECT id FROM Mutuals)
     ORDER BY RAND()
     LIMIT 5;
   `;
 
-  db.query(sql, [userId, userId, userId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [results] = await db.query(sql, [userId, userId, userId]);
     res.json(results);
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-router.get("/leaderboard", (req, res) => {
+
+router.get("/leaderboard", async (req, res) => {
   const sql = `
     SELECT 
       users.id, 
@@ -253,10 +308,14 @@ router.get("/leaderboard", (req, res) => {
     LIMIT 10;
   `;
 
-  db.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [results] = await db.query(sql);
     res.json(results);
-  });
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
 });
+
 
 module.exports = router;

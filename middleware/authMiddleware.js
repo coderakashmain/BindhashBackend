@@ -3,7 +3,7 @@ require("dotenv").config();
 
 
 const verifyToken = (req, res, next) =>  {
-  const token = req.cookies.usertoken; // Read token from cookies
+  const token = req.cookies.usertoken; 
 
   if (!token) {
     return res.status(401).json({ authenticated: false, message: "No token found" });

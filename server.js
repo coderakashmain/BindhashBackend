@@ -6,6 +6,9 @@ const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const authCheckRoutes = require("./routes/authCheckRoutes");
 const userRoutes = require('./routes/userRoutes')
+const storyRoutes = require('./routes/storyRoutes')
+const pollRoutes = require('./routes/pollRoutes')
+const authpostFuntionRoutes = require('./routes/authpostFuntionRoutes')
 const path = require("path");
 const cookieParser = require("cookie-parser");
 
@@ -41,6 +44,9 @@ app.use("/api/posts", postRoutes(io));
 app.use("/api/auth-check", authCheckRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/messages", chatRoutes);
+app.use("/api/stories",storyRoutes);
+app.use("/api/polls",pollRoutes(io));
+app.use("/api/postfuntion",authpostFuntionRoutes);
 
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
@@ -94,19 +100,18 @@ io.on("connection", (socket) => {
 });
 
 
-socket.on("like_comment", ({ comment_id }) => {
+socket.on("like_comment", async ({ comment_id }) => {
   const sql = "SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?";
-  
-  db.query(sql, [comment_id], (err, result) => {
-      if (err) {
-          console.error("Error fetching likes:", err);
-          return;
-      }
-      
-      const new_likes = result[0].like_count; 
 
-      io.emit("comment_liked", { comment_id, new_likes });
-  });
+  try {
+    const [result] = await db.promise().query(sql, [comment_id]);
+
+    const new_likes = result[0].like_count; 
+
+    io.emit("comment_liked", { comment_id, new_likes });
+  } catch (error) {
+    console.error("Error fetching likes:", error);
+  }
 });
 
 
@@ -150,22 +155,29 @@ socket.on("like_comment", ({ comment_id }) => {
 
 
 
-socket.on("markAsRead", (data) => {
-  const { sender_id, receiver_id } = data;
-
-  const sql = "UPDATE messages SET status = ? WHERE sender_id = ? AND receiver_id = ? AND status != ?";
-  db.query(sql, ["read", sender_id, receiver_id, "read"], (err, result) => {
-      if (err) {
-          console.error("Error updating message status:", err);
-          return;
-      }
-
-      // Notify sender that messages are read
-      if (onlineUsers[sender_id]) {
+    socket.on("markAsRead", async (data) => {
+      const { sender_id, receiver_id } = data;
+    
+      const sql = `
+        UPDATE messages 
+        SET status = ? 
+        WHERE sender_id = ? 
+          AND receiver_id = ? 
+          AND status != ?
+      `;
+    
+      try {
+        const [result] = await db.promise().query(sql, ["read", sender_id, receiver_id, "read"]);
+    
+        // Notify sender that messages are read
+        if (onlineUsers[sender_id]) {
           io.to(onlineUsers[sender_id]).emit("messageRead", { sender_id, receiver_id });
+        }
+      } catch (error) {
+        console.error("Error updating message status:", error);
       }
-  });
-});
+    });
+    
 
 
   socket.on("disconnect", () => {

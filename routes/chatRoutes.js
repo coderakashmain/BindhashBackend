@@ -1,10 +1,10 @@
 const express = require("express");
-const db = require("../config/db");
+const db = require("../config/db"); // Kept as db (your original name)
 
 const router = express.Router();
 
 module.exports = (io) => {
-  router.get("/:receiverId", (req, res) => {
+  router.get("/:receiverId", async (req, res) => {
     const { userId } = req.query; // Logged-in user
     const { receiverId } = req.params;
 
@@ -15,32 +15,25 @@ module.exports = (io) => {
       ORDER BY created_at ASC
     `;
 
-    db.query(sql, [userId, receiverId, receiverId, userId], (err, result) => {
-      if (err) {
-        console.log(err);
-        return res.status(500).json({ error: "Database error" });
-      }
+    try {
+      const [result] = await db.query(sql, [userId, receiverId, receiverId, userId]);
       res.json(result);
-    });
+    } catch (err) {
+      console.log(err);
+      return res.status(500).json({ error: "Database error" });
+    }
   });
 
-  router.post("/", (req, res) => {
+  router.post("/", async (req, res) => {
     const { sender_id, receiver_id, message } = req.body;
 
     const sql = "INSERT INTO messages (sender_id, receiver_id, message, created_at, status) VALUES (?, ?, ?, NOW(), 'sent')";
-    
-    db.query(sql, [sender_id, receiver_id, message], (err, result) => {
-      if (err) {
-        return res.status(500).json({ error: "Database error" });
-      }
 
+    try {
+      const [result] = await db.query(sql, [sender_id, receiver_id, message]);
 
       const fetchSql = "SELECT created_at FROM messages WHERE id = ?";
-      db.query(fetchSql, [result.insertId], (fetchErr, fetchResult) => {
-          if (fetchErr) {
-              return res.status(500).json({ error: "Error fetching timestamp" });
-          }
-
+      const [fetchResult] = await db.query(fetchSql, [result.insertId]);
 
       const savedMessage = {
         id: result.insertId,
@@ -51,24 +44,24 @@ module.exports = (io) => {
         status: "sent"
       };
 
-      const receiverSocket = global.onlineUsers[receiver_id];  
+      const receiverSocket = global.onlineUsers[receiver_id];
 
       if (!receiverSocket) {
         console.log(`User ${receiver_id} is not online.`);
         return res.status(200).json({ message: "Message saved, but user is offline" });
-    }
-
-      if (receiverSocket) {
-        io.to(receiverSocket).emit("privateMessage", { ...savedMessage, status: "delivered" });
-        const updateSql = "UPDATE messages SET status = ? WHERE id = ?";
-        db.query(updateSql, ["delivered", savedMessage.id]);
-
       }
 
+      io.to(receiverSocket).emit("privateMessage", { ...savedMessage, status: "delivered" });
+
+      const updateSql = "UPDATE messages SET status = ? WHERE id = ?";
+      await db.query(updateSql, ["delivered", savedMessage.id]);
+
       res.json({ success: true, message_id: result.insertId });
-    });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Database error" });
+    }
   });
-});
 
   return router;
 };
