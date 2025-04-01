@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../config/db");
 const { pollUpload } = require("../middleware/multerConfig");
+const authMiddleware = require('../middleware/authMiddleware')
 
 const router = express.Router();
 
@@ -55,9 +56,15 @@ module.exports = (io) => {
   );
 
   // Fetch Polls API
-  router.get("/:userId", async (req, res) => {
+  router.get("/:user_id",authMiddleware, async (req, res) => {
+    if (!req.user) {
+      console.log("User not found in middleware.");
+      return res.status(401).json({ authenticated: false, message: "No token found" });
+    }
+    const user_id = req.params.user_id;
+    console.log(user_id)
+
     try {
-      const user_id = req.params.userId;
       console.log("user user_id:", user_id);
 
    

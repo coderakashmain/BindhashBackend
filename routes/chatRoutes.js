@@ -16,7 +16,12 @@ module.exports = (io) => {
     `;
 
     try {
-      const [result] = await db.query(sql, [userId, receiverId, receiverId, userId]);
+      const [result] = await db.query(sql, [
+        userId,
+        receiverId,
+        receiverId,
+        userId,
+      ]);
       res.json(result);
     } catch (err) {
       console.log(err);
@@ -26,8 +31,9 @@ module.exports = (io) => {
 
   router.post("/", async (req, res) => {
     const { sender_id, receiver_id, message } = req.body;
-
-    const sql = "INSERT INTO messages (sender_id, receiver_id, message, created_at, status) VALUES (?, ?, ?, NOW(), 'sent')";
+  
+    const sql =
+      "INSERT INTO messages (sender_id, receiver_id, message, created_at, status) VALUES (?, ?, ?, NOW(), 'sent')";
 
     try {
       const [result] = await db.query(sql, [sender_id, receiver_id, message]);
@@ -41,20 +47,44 @@ module.exports = (io) => {
         receiver_id,
         message,
         created_at: fetchResult[0].created_at,
-        status: "sent"
+        status: "sent",
       };
 
       const receiverSocket = global.onlineUsers[receiver_id];
-
+      
       if (!receiverSocket) {
         console.log(`User ${receiver_id} is not online.`);
-        return res.status(200).json({ message: "Message saved, but user is offline" });
+        return res
+          .status(200)
+          .json({ message: "Message saved, but user is offline" });
       }
 
-      io.to(receiverSocket).emit("privateMessage", { ...savedMessage, status: "delivered" });
+     
+      io.to(receiverSocket).emit("privateMessage", {
+        ...savedMessage,
+        status: "delivered",
+      });
 
       const updateSql = "UPDATE messages SET status = ? WHERE id = ?";
       await db.query(updateSql, ["delivered", savedMessage.id]);
+
+      try{
+        const interactionSql = `
+        INSERT INTO interactions (user_id_1, user_id_2, weight, last_interaction)
+        VALUES (?, ?, 5, NOW()) 
+        ON DUPLICATE KEY UPDATE weight = weight + 5, last_interaction = NOW();
+    `;
+
+   const [results]=  await db.query(interactionSql, [
+          Math.min(sender_id, receiver_id),
+          Math.max(sender_id, receiver_id),
+        ]);
+
+      }catch(err){
+        console.error("This is interactionSql error",err);
+      }
+
+     
 
       res.json({ success: true, message_id: result.insertId });
     } catch (err) {

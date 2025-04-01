@@ -4,25 +4,31 @@ const multer = require("multer");
 const path = require("path");
 const authMiddleware = require("../middleware/authMiddleware");
 const { profileUpload, postUpload } = require("../middleware/multerConfig");
+const { Socket } = require("dgram");
 
 const router = express.Router();
 
 module.exports = (io) => {
-  router.post("/create", postUpload.single("image"), async (req, res) => {
-    const { user_id, content } = req.body;
+  router.post("/create", postUpload.single("media"), async (req, res) => {
+    console.log("Received Body:", req.body);
+    const { user_id, content  } = req.body;
+    console.log("Received File:", req.file);
     try {
-      let imageUrl = null;
+      
+      let mediaType = null;
 
-      // Check if file exists (Cloudinary will store the uploaded file here)
+   
       if (req.file && req.file.path) {
-        imageUrl = req.file.path; // Cloudinary gives the secure URL
+        mediaUrl = req.file.path; // Cloudinary URL
+        mediaType = req.file.mimetype.startsWith("image/") ? "image" : "video";
       }
 
       const sql =
-        "INSERT INTO posts (user_id, content, image, created_at) VALUES (?, ?, ?, NOW())";
-      const [results] = await db.query(sql, [user_id, content, imageUrl]);
+        "INSERT INTO posts (user_id, content, image,media_type , created_at) VALUES (?, ?, ?,?, NOW())";
+      const [results] = await db.query(sql, [user_id, content, mediaUrl,mediaType]);
 
-      res.json({ message: "Post created successfully!", imageUrl });
+
+      res.json({ message: "Post created successfully!", mediaUrl });
     } catch (error) {
       console.log(error);
       res.status(500).json({ error: error.message });
@@ -47,6 +53,7 @@ module.exports = (io) => {
                     NULL AS poll_id,
                     posts.content, 
                     posts.image, 
+                    posts.media_type,
                     posts.created_at, 
                     users.username AS post_username, 
                     users.profile_pic AS post_user_pic, 
@@ -93,6 +100,7 @@ module.exports = (io) => {
                     polls.id AS poll_id, 
                     polls.question AS content, 
                     NULL AS image, 
+                         NULL AS media_type,
                        polls.created_at, 
           poll_users.username AS post_username, 
           poll_users.profile_pic AS post_user_pic, 

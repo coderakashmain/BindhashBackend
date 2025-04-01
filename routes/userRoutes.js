@@ -21,16 +21,15 @@ router.get("/", async (req, res) => {
 
   try {
     const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
-    
+
     const [results] = await db.query(sql, [userId]); // Use promise-based query
-    
+
     res.json(results); // No need for `[0]`, as `results` is already an array
   } catch (err) {
     console.error("Database query error:", err);
     return res.status(500).json({ error: "Database error" });
   }
 });
-
 
 router.get("/userlist", async (req, res) => {
   const { userId } = req.query; // Get logged-in user ID
@@ -41,16 +40,15 @@ router.get("/userlist", async (req, res) => {
 
   try {
     const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
-    
+
     const [result] = await db.query(sql, [userId]); // Use promise-based query
-    
+
     res.json(result); // Return the result array
   } catch (err) {
     console.error("Database query error:", err);
     return res.status(500).json({ error: "Database error" });
   }
 });
-
 
 router.get("/chat", async (req, res) => {
   const { userId } = req.query;
@@ -70,12 +68,12 @@ router.get("/chat", async (req, res) => {
   }
 });
 
-
 router.post(
   "/upload-profile",
   profileUpload.single("profile_pic"),
   async (req, res) => {
-    const { userid } = req.body;
+    const { userid, mainphoto } = req.body;
+    console.log(req.body);
 
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
@@ -84,35 +82,56 @@ router.post(
     const profilePicPath = req.file.path;
 
     try {
-      // Fetch the old profile picture
-      const sqlGetOldImage = "SELECT profile_pic FROM users WHERE id = ?";
-      const [result] = await db.query(sqlGetOldImage, [userid]);
+      if (mainphoto === "true") {
+        const sqlGetOldImage = "SELECT profile_pic FROM users WHERE id = ?";
+        const [result] = await db.query(sqlGetOldImage, [userid]);
 
-      if (result.length > 0 && result[0].profile_pic) {
-        const oldImageUrl = result[0].profile_pic;
-        const parts = oldImageUrl.split("/").slice(-2).join("/"); 
-        const publicId = parts.substring(0, parts.lastIndexOf("."));
+        if (result.length > 0 && result[0].profile_pic) {
+          const oldImageUrl = result[0].profile_pic;
+          const parts = oldImageUrl.split("/").slice(-2).join("/");
+          const publicId = parts.substring(0, parts.lastIndexOf("."));
 
-        try {
-          await cloudinary.uploader.destroy(publicId);
-        } catch (cloudinaryError) {
-          console.error("Cloudinary delete error:", cloudinaryError);
+          try {
+            await cloudinary.uploader.destroy(publicId);
+          } catch (cloudinaryError) {
+            console.error("Cloudinary delete error:", cloudinaryError);
+          }
         }
+
+        // Update the new profile picture
+        const sqlUpdate = "UPDATE users SET profile_pic = ? WHERE id = ?";
+        await db.query(sqlUpdate, [profilePicPath, userid]);
+        res.json({ profile_pic: profilePicPath });
+      } else {
+        const sqlGetOldImage = "SELECT profileback_pic FROM users WHERE id = ?";
+        const [result] = await db.query(sqlGetOldImage, [userid]);
+
+        if (result.length > 0 && result[0].profile_pic) {
+          const oldImageUrl = result[0].profile_pic;
+          const parts = oldImageUrl.split("/").slice(-2).join("/");
+          const publicId = parts.substring(0, parts.lastIndexOf("."));
+
+          try {
+            await cloudinary.uploader.destroy(publicId);
+          } catch (cloudinaryError) {
+            console.error("Cloudinary delete error:", cloudinaryError);
+          }
+        }
+
+        // Update the new profile picture
+        const sqlUpdate = "UPDATE users SET profileback_pic = ? WHERE id = ?";
+        await db.query(sqlUpdate, [profilePicPath, userid]);
+      
+        res.json({ profileback_pic: profilePicPath });
       }
 
-      // Update the new profile picture
-      const sqlUpdate = "UPDATE users SET profile_pic = ? WHERE id = ?";
-      await db.query(sqlUpdate, [profilePicPath, userid]);
-
-      res.json({ profile_pic: profilePicPath });
-
+    
     } catch (error) {
       console.error("Database or Cloudinary error:", error);
       return res.status(500).json({ error: "Internal Server Error" });
     }
   }
 );
-
 
 router.get("/followers-count", async (req, res) => {
   const { userId } = req.query;
@@ -136,12 +155,13 @@ router.get("/followers-count", async (req, res) => {
   }
 });
 
-
 router.post("/follow", async (req, res) => {
   const { followerId, followingId } = req.body;
 
   if (!followerId || !followingId) {
-    return res.status(400).json({ error: "Both followerId and followingId are required" });
+    return res
+      .status(400)
+      .json({ error: "Both followerId and followingId are required" });
   }
 
   if (followerId === followingId) {
@@ -164,12 +184,13 @@ router.post("/follow", async (req, res) => {
   }
 });
 
-
 router.post("/unfollow", async (req, res) => {
   const { followerId, followingId } = req.body;
 
   if (!followerId || !followingId) {
-    return res.status(400).json({ error: "Both followerId and followingId are required" });
+    return res
+      .status(400)
+      .json({ error: "Both followerId and followingId are required" });
   }
 
   const sql = `DELETE FROM followers WHERE follower_id = ? AND following_id = ?`;
@@ -188,15 +209,17 @@ router.post("/unfollow", async (req, res) => {
   }
 });
 
-
 router.get("/is-following", async (req, res) => {
   const { followerId, followingId } = req.query;
 
   if (!followerId || !followingId) {
-    return res.status(400).json({ error: "Both followerId and followingId are required" });
+    return res
+      .status(400)
+      .json({ error: "Both followerId and followingId are required" });
   }
 
-  const sql = "SELECT 1 FROM followers WHERE follower_id = ? AND following_id = ? LIMIT 1";
+  const sql =
+    "SELECT 1 FROM followers WHERE follower_id = ? AND following_id = ? LIMIT 1";
 
   try {
     const [results] = await db.query(sql, [followerId, followingId]);
@@ -207,7 +230,6 @@ router.get("/is-following", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
-
 
 router.get("/suggested-users", async (req, res) => {
   const { userId } = req.query;
@@ -249,7 +271,6 @@ router.get("/suggested-users", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
-
 
 router.get("/leaderboard", async (req, res) => {
   const sql = `
@@ -316,6 +337,5 @@ router.get("/leaderboard", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
-
 
 module.exports = router;

@@ -21,15 +21,35 @@ const profileStorage = new CloudinaryStorage({
 // 🔹 Cloudinary Storage for Post Images
 const postStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
+  params: async (req, file) => {
+    const isVideo = file.mimetype.startsWith("video/");
+    console.log(file)
+    return {
+      folder: "post_media",
+      resource_type: isVideo ? "video" : "image",
+      format: isVideo ? "mp4" : "jpg",
+      allowed_formats: ["jpg", "jpeg", "png", "mp4"],
+      transformation: isVideo
+        ? [{ quality: "auto", fetch_format: "auto" }] // Optimize video size
+        : [{ width: 800, height: 800, crop: "limit" }, { quality: "auto:good" }],
+    };
+  },
+ 
+});
+
+const storyStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
   params: {
-    folder: "post_images",
+    folder: "story_content",
     allowed_formats: ["jpg", "jpeg", "png", "mp4"],
+    resource_type: "auto", 
     transformation: [
       { width: 800, height: 800, crop: "limit" }, 
       { quality: "auto:good" }, 
     ],
   },
 });
+
 const pollStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => ({
@@ -47,5 +67,6 @@ const pollStorage = new CloudinaryStorage({
 const profileUpload = multer({ storage: profileStorage });
 const postUpload = multer({ storage: postStorage });
 const pollUpload = multer({ storage: pollStorage });
+const storyUpload = multer({ storage: storyStorage });
 
-module.exports = { profileUpload, postUpload,pollUpload };
+module.exports = { profileUpload, postUpload,pollUpload,storyUpload };
