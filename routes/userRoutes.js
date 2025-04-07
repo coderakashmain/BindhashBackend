@@ -16,20 +16,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-router.get("/", async (req, res) => {
-  const { userId } = req.query; // Get logged-in user ID
 
-  try {
-    const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
-
-    const [results] = await db.query(sql, [userId]); // Use promise-based query
-
-    res.json(results); // No need for `[0]`, as `results` is already an array
-  } catch (err) {
-    console.error("Database query error:", err);
-    return res.status(500).json({ error: "Database error" });
-  }
-});
 
 router.get("/userlist", async (req, res) => {
   const { userId } = req.query; // Get logged-in user ID
@@ -50,23 +37,7 @@ router.get("/userlist", async (req, res) => {
   }
 });
 
-router.get("/chat", async (req, res) => {
-  const { userId } = req.query;
 
-  if (!userId) {
-    return res.status(400).json({ error: "User ID is required" });
-  }
-
-  try {
-    const sql = "SELECT id, username, profile_pic FROM users WHERE id = ?";
-    const [result] = await db.query(sql, [userId]);
-
-    res.json(result);
-  } catch (err) {
-    console.error("Database query error:", err);
-    return res.status(500).json({ error: "Database error" });
-  }
-});
 
 router.post(
   "/upload-profile",
@@ -154,6 +125,46 @@ router.get("/followers-count", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+
+
+router.get("/followers-list", async (req, res) => {
+  const { userId, type } = req.query;
+
+  if (!userId || !type) {
+    return res.status(400).json({ error: "User ID and type are required" });
+  }
+
+  let sql;
+  if (type === "followers") {
+    sql = `
+      SELECT users.id, users.fullname, users.username ,users.profile_pic
+      FROM followers
+      JOIN users ON followers.follower_id = users.id
+      WHERE followers.following_id = ?`;
+  } else if (type === "following") {
+    sql = `
+      SELECT users.id, users.fullname, users.username ,users.profile_pic
+      FROM followers
+      JOIN users ON followers.following_id = users.id
+      WHERE followers.follower_id = ?`;
+  } else {
+    return res.status(400).json({ error: "Invalid type parameter" });
+  }
+
+  try {
+    const [results] = await db.query(sql, [userId]);
+    res.json(results);
+  } catch (error) {
+    console.error("Database query error:", error);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+
+
+
+
+
 
 router.post("/follow", async (req, res) => {
   const { followerId, followingId } = req.body;
@@ -272,70 +283,269 @@ router.get("/suggested-users", async (req, res) => {
   }
 });
 
+
+
+
 router.get("/leaderboard", async (req, res) => {
-  const sql = `
+  const { userId } = req.query; // Get user ID (optional)
+
+  // ✅ Query for fetching the top 10 leaderboard with correct ranking
+  const leaderboardSQL = `
+  WITH RecentPosts AS (
+    -- Select posts from the last 7 days
+    SELECT id, user_id FROM posts WHERE created_at >= NOW() - INTERVAL 7 DAY
+  ),
+
+  Engagement AS (
     SELECT 
       users.id, 
       users.username, 
       users.profile_pic, 
-      IFNULL(like_count.total_likes, 0) AS total_likes,
-      IFNULL(comment_count.total_comments, 0) AS total_comments,
-      IFNULL(share_count.total_shares, 0) AS total_shares,
-      IFNULL(followers_count.total_followers, 0) AS total_followers,
+      COALESCE(like_count.total_likes, 0) AS total_likes,
+      COALESCE(comment_count.total_comments, 0) AS total_comments,
+      COALESCE(share_count.total_shares, 0) AS total_shares,
+      COALESCE(followers_count.total_followers, 0) AS total_followers,
 
-      -- Calculate engagement score
-      (IFNULL(like_count.total_likes, 0) * 1 + 
-       IFNULL(comment_count.total_comments, 0) * 2 + 
-       IFNULL(share_count.total_shares, 0) * 3 + 
-       IFNULL(followers_count.total_followers, 0) * 5) AS engagement_score 
+      -- ✅ Correct engagement score calculation
+      (COALESCE(like_count.total_likes, 0) * 1 + 
+      COALESCE(comment_count.total_comments, 0) * 2 + 
+      COALESCE(share_count.total_shares, 0) * 3 + 
+      COALESCE(followers_count.total_followers, 0) * 5) AS engagement_score 
 
     FROM users
 
-    -- Count Likes
+    -- Count Likes (last 7 days)
     LEFT JOIN (
       SELECT posts.user_id, COUNT(*) AS total_likes 
       FROM likes 
-      JOIN posts ON likes.post_id = posts.id 
+      JOIN RecentPosts AS posts ON likes.post_id = posts.id 
       GROUP BY posts.user_id
     ) AS like_count ON like_count.user_id = users.id
 
-    -- Count Comments
+    -- Count Comments (last 7 days)
     LEFT JOIN (
       SELECT posts.user_id, COUNT(*) AS total_comments 
       FROM comments 
-      JOIN posts ON comments.post_id = posts.id 
+      JOIN RecentPosts AS posts ON comments.post_id = posts.id 
       GROUP BY posts.user_id
     ) AS comment_count ON comment_count.user_id = users.id
 
-    -- Count Shares
+    -- Count Shares (last 7 days)
     LEFT JOIN (
       SELECT posts.user_id, COUNT(*) AS total_shares 
       FROM shares 
-      JOIN posts ON shares.post_id = posts.id 
+      JOIN RecentPosts AS posts ON shares.post_id = posts.id 
       GROUP BY posts.user_id
     ) AS share_count ON share_count.user_id = users.id
 
-    -- Count Followers
+    -- Count Followers (all time)
     LEFT JOIN (
       SELECT following_id, COUNT(*) AS total_followers 
       FROM followers 
       GROUP BY following_id
     ) AS followers_count ON followers_count.following_id = users.id
+  )
 
-    -- Sort by engagement score (most active users first)
-    ORDER BY engagement_score DESC 
+  -- ✅ Assign Rank BEFORE applying LIMIT
+  SELECT *,
+         RANK() OVER (ORDER BY engagement_score DESC) AS user_rank
+  FROM Engagement
+  ORDER BY engagement_score DESC
+  LIMIT 10;
+  `;
 
-    -- Limit to Top 10 users
-    LIMIT 10;
+  // ✅ Query to fetch the current user's rank, even if they are not in the top 10
+  const userRankSQL = `
+  WITH RecentPosts AS (
+    SELECT id, user_id FROM posts WHERE created_at >= NOW() - INTERVAL 7 DAY
+  ),
+
+  Engagement AS (
+    SELECT 
+      users.id, 
+      users.username, 
+      users.profile_pic, 
+      COALESCE(like_count.total_likes, 0) AS total_likes,
+      COALESCE(comment_count.total_comments, 0) AS total_comments,
+      COALESCE(share_count.total_shares, 0) AS total_shares,
+      COALESCE(followers_count.total_followers, 0) AS total_followers,
+
+      (COALESCE(like_count.total_likes, 0) * 1 + 
+      COALESCE(comment_count.total_comments, 0) * 2 + 
+      COALESCE(share_count.total_shares, 0) * 3 + 
+      COALESCE(followers_count.total_followers, 0) * 5) AS engagement_score 
+
+    FROM users
+
+    LEFT JOIN (
+      SELECT posts.user_id, COUNT(*) AS total_likes 
+      FROM likes 
+      JOIN RecentPosts AS posts ON likes.post_id = posts.id 
+      GROUP BY posts.user_id
+    ) AS like_count ON like_count.user_id = users.id
+
+    LEFT JOIN (
+      SELECT posts.user_id, COUNT(*) AS total_comments 
+      FROM comments 
+      JOIN RecentPosts AS posts ON comments.post_id = posts.id 
+      GROUP BY posts.user_id
+    ) AS comment_count ON comment_count.user_id = users.id
+
+    LEFT JOIN (
+      SELECT posts.user_id, COUNT(*) AS total_shares 
+      FROM shares 
+      JOIN RecentPosts AS posts ON shares.post_id = posts.id 
+      GROUP BY posts.user_id
+    ) AS share_count ON share_count.user_id = users.id
+
+    LEFT JOIN (
+      SELECT following_id, COUNT(*) AS total_followers 
+      FROM followers 
+      GROUP BY following_id
+    ) AS followers_count ON followers_count.following_id = users.id
+  )
+
+  -- ✅ Fetch the rank of a specific user
+  SELECT *,
+         RANK() OVER (ORDER BY engagement_score DESC) AS user_rank
+  FROM Engagement
+  WHERE id = ?;
   `;
 
   try {
-    const [results] = await db.query(sql);
-    res.json(results);
+    // Fetch top 10 leaderboard
+    const [leaderboard] = await db.query(leaderboardSQL);
+
+    let userRank = null;
+    if (userId) {
+      // Fetch current user's rank separately
+      const [userResult] = await db.query(userRankSQL, [userId]);
+      userRank = userResult.length > 0 ? userResult[0] : null;
+    }
+
+    res.json({
+      leaderboard,
+      userRank,
+    });
   } catch (error) {
     console.error("Database query error:", error);
     res.status(500).json({ error: "Database error" });
   }
 });
+
+
+
+router.get("/tags", async (req, res) => {
+  const { user_id } = req.query;
+  try {
+      const [tags] = await db.query("SELECT tag FROM user_tags WHERE user_id = ?", [user_id]);
+      res.json(tags.map(t => t.tag));
+  } catch (error) {
+      console.error("Error fetching tags:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.post("/tags", async (req, res) => {
+  const { user_id, tags } = req.body;
+  try {
+      await db.query("DELETE FROM user_tags WHERE user_id = ?", [user_id]);
+      if(tags.length > 0){
+        const values = tags.map(tag => [user_id, tag]);
+        await db.query("INSERT INTO user_tags (user_id, tag) VALUES ?", [values]);
+      } // Clear old tags
+     
+
+      res.json({ success: true });
+  } catch (error) {
+      console.error("Error saving tags:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+router.put("/profiledit/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  const { fullName, username, bio } = req.body; // Destructure fields
+
+  const connection = await db.getConnection(); // Get a DB connection
+
+  try {
+      await connection.beginTransaction(); 
+
+      // Update only changed fields in 'users' table
+      if (fullName || username) {
+          const fieldsToUpdate = [];
+          const values = [];
+
+          if (fullName) {
+              fieldsToUpdate.push("fullname = ?");
+              values.push(fullName);
+          }
+          if (username) {
+              fieldsToUpdate.push("username = ?");
+              values.push(username);
+          }
+
+          if (fieldsToUpdate.length > 0) {
+              values.push(userId); // Add userId to the query
+              const sql = `UPDATE users SET ${fieldsToUpdate.join(", ")} WHERE id = ?`;
+              await connection.execute(sql, values);
+          }
+      }
+
+      // Update only changed fields in 'user_bio' table
+      if (bio) {
+        const fieldsToUpdate = [];
+        const values = [];
+        
+    
+        Object.entries(bio).forEach(([key, value]) => {
+            if (value) {
+                fieldsToUpdate.push(`${key} = ?`);
+                values.push(value);
+            }
+        });
+    
+        if (fieldsToUpdate.length > 0) {
+            // Check if bio exists for the user
+            const [existingBio] = await connection.execute(
+                "SELECT user_id FROM user_bio WHERE user_id = ?",
+                [userId]
+            );
+    
+            if (existingBio.length > 0) {
+                // If bio exists, update it
+                values.push(userId);
+                const sql = `UPDATE user_bio SET ${fieldsToUpdate.join(", ")} WHERE user_id = ?`;
+                await connection.execute(sql, values);
+            } else {
+                // If bio does not exist, insert a new row
+                const columns = Object.keys(bio).join(", ");
+                const placeholders = Object.keys(bio).map(() => "?").join(", ");
+                const insertValues = Object.values(bio);
+    
+                const sql = `INSERT INTO user_bio (user_id, ${columns}) VALUES (?, ${placeholders})`;
+                await connection.execute(sql, [userId, ...insertValues]);
+            }
+        }
+    }
+
+      await connection.commit(); // Commit transaction
+      res.json({ success: true, message: "Profile updated successfully" });
+
+  } catch (error) {
+      await connection.rollback(); // Rollback on failure
+      console.error("Update failed:", error);
+      res.status(500).json({ success: false, message: "Server error" });
+
+  } finally {
+      connection.release(); // Release connection
+  }
+});
+
+
+
 
 module.exports = router;

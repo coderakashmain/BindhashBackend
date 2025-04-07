@@ -22,8 +22,9 @@ const profileStorage = new CloudinaryStorage({
 const postStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
+ 
+
     const isVideo = file.mimetype.startsWith("video/");
-    console.log(file)
     return {
       folder: "post_media",
       resource_type: isVideo ? "video" : "image",

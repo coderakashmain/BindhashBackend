@@ -8,6 +8,7 @@ const authCheckRoutes = require("./routes/authCheckRoutes");
 const userRoutes = require('./routes/userRoutes')
 const storyRoutes = require('./routes/storyRoutes')
 const pollRoutes = require('./routes/pollRoutes')
+const chatRoutes = require('./routes/chatRoutes')
 const authpostFuntionRoutes = require('./routes/authpostFuntionRoutes')
 const path = require("path");
 const cookieParser = require("cookie-parser");
@@ -29,7 +30,6 @@ const io = new Server(server, {
       credentials: true,
     },
   });
-  const chatRoutes = require('./routes/chatRoutes')(io);
 
   const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
   const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -43,7 +43,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes(io));
 app.use("/api/auth-check", authCheckRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/messages", chatRoutes);
+app.use("/api/messages", chatRoutes(io));
 app.use("/api/stories",storyRoutes);
 app.use("/api/polls",pollRoutes(io));
 app.use("/api/postfuntion",authpostFuntionRoutes);
@@ -84,19 +84,33 @@ app.post("/subscribe", (req, res) => {
 
 
 
-global.onlineUsers = {};
+
+
+ global.onlineUsers = {};
 
 
 
 io.on("connection", (socket) => {
-  socket.on("userConnected", (userId) => {
-      if (userId) {
-          global.onlineUsers[userId] = socket.id;
-      }
+  console.log("A user connected:", socket.id);
+
+
+  socket.on("addUser", (userId) => {
+ 
+    if (!global.onlineUsers) global.onlineUsers = {};
+  
+    
+
+        global.onlineUsers[userId] = socket.id;
+        // console.log(`User ${userId} added with socket ID ${socket.id}`);
+ 
+
+        //   console.log("Current Online Users:");
+        //   console.table(global.onlineUsers);
+ 
   });
 
   socket.on("new_comment", (comment) => {
-    io.emit("new_comment", comment);  // Broadcast to all users
+    io.emit("new_comment", comment);  
 });
 
 
@@ -104,7 +118,7 @@ socket.on("like_comment", async ({ comment_id }) => {
   const sql = "SELECT COUNT(*) AS like_count FROM comment_likes WHERE comment_id = ?";
 
   try {
-    const [result] = await db.promise().query(sql, [comment_id]);
+    const [result] = await db.query(sql, [comment_id]);
 
     const new_likes = result[0].like_count; 
 
@@ -125,32 +139,32 @@ socket.on("like_comment", async ({ comment_id }) => {
 
 
 
-  socket.on("disconnect", () => {
-      Object.keys(global.onlineUsers).forEach((key) => {
-          if (global.onlineUsers[key] === socket.id) {
-              delete global.onlineUsers[key];
-          }
-      });
-  });
+ 
 
 
   socket.on("sendMessage", async (data) => {
-    const { sender_id, receiver_id, message_id, message } = data;
+    const { sender_id, receiver_id, id, message } = data;
 
     
 
-        // Send message to recipient if they are online
-        if (onlineUsers[receiver_id]) {
-          io.to(onlineUsers[receiver_id]).emit("privateMessage", { message_id, sender_id, receiver_id, message, status: "delivered" });
-  
+    if (onlineUsers[receiver_id]) {
+      io.to(onlineUsers[receiver_id]).emit("privateMessage", {
+        message_id: id,
+        sender_id,
+        receiver_id,
+        message,
+        status: "delivered",
+      });
           // Update status to "delivered" in DB
           const updateSql = "UPDATE messages SET status = ? WHERE id = ?";
-          db.query(updateSql, ["delivered", message_id]);
-          sendWebPushNotification(sender_id,message)
+          db.query(updateSql, ["delivered", id]);
+          // sendWebPushNotification(sender_id,message)
       }
 
         // Notify sender that the message is sent
-        io.to(onlineUsers[sender_id]).emit("messageStatus", { message_id, status: "sent" });
+        if (onlineUsers[sender_id]) {
+          io.to(onlineUsers[sender_id]).emit("messageStatus", { message_id: id, status: "sent" });
+        }
     });
 
 
@@ -160,16 +174,16 @@ socket.on("like_comment", async ({ comment_id }) => {
     
       const sql = `
         UPDATE messages 
-        SET status = ? 
+        SET status = 'read'
         WHERE sender_id = ? 
           AND receiver_id = ? 
-          AND status != ?
+          AND status != 'read'
       `;
     
       try {
-        const [result] = await db.promise().query(sql, ["read", sender_id, receiver_id, "read"]);
+        const [result] = await db.query(sql, [ sender_id, receiver_id]);
     
-        // Notify sender that messages are read
+       
         if (onlineUsers[sender_id]) {
           io.to(onlineUsers[sender_id]).emit("messageRead", { sender_id, receiver_id });
         }
@@ -189,6 +203,10 @@ socket.on("like_comment", async ({ comment_id }) => {
     }
     io.emit("onlineUsers", Object.keys(onlineUsers));
     console.log("User disconnected:", socket.id);
+
+
+    console.log("Updated Online Users:");
+    console.table(global.onlineUsers);
   });
 });
 

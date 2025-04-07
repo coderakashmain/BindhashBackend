@@ -1,12 +1,33 @@
 const express = require("express");
-const db = require("../config/db"); // Kept as db (your original name)
-
+const db = require("../config/db"); 
+const {verifyToken} = require("../middleware/authMiddleware")
 const router = express.Router();
 
 module.exports = (io) => {
+
+  router.get("/users",verifyToken, async (req, res) => {
+    const { userId } = req.query; 
+
+   
+    try {
+      const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
+  
+      const [results] = await db.query(sql, [userId]); // Use promise-based query
+  
+      res.json(results); 
+    } catch (err) {
+      console.error("Database query error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+  });
+
+
+
+
   router.get("/:receiverId", async (req, res) => {
     const { userId } = req.query; // Logged-in user
     const { receiverId } = req.params;
+
 
     const sql = `
       SELECT * FROM messages 
@@ -49,10 +70,13 @@ module.exports = (io) => {
         created_at: fetchResult[0].created_at,
         status: "sent",
       };
-
-      const receiverSocket = global.onlineUsers[receiver_id];
+      console.log("Current online users:", global.onlineUsers);
+      const receiverSocket = global.onlineUsers[String(receiver_id)];
       
       if (!receiverSocket) {
+        if (global.onlineUsers[sender_id]) {
+          io.to(global.onlineUsers[sender_id]).emit("sendMessage", savedMessage);
+        }
         console.log(`User ${receiver_id} is not online.`);
         return res
           .status(200)
@@ -85,10 +109,40 @@ module.exports = (io) => {
       }
 
      
-
+       
       res.json({ success: true, message_id: result.insertId });
     } catch (err) {
       console.error(err);
+      return res.status(500).json({ error: "Database error" });
+    }
+  });
+
+
+  router.get("/chat/data", async (req, res) => {
+    const { userId } = req.query;
+  
+
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+  
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+  
+    try {
+      const sql = `
+  SELECT users.id, users.username, users.profile_pic, user_bio.philosophy
+  FROM users
+  LEFT JOIN user_bio ON users.id = user_bio.user_id
+  WHERE users.id = ?
+`;
+
+      const [result] = await db.query(sql, [userId]);
+
+      res.json(result);
+    } catch (err) {
+      console.error("Database query error:", err);
       return res.status(500).json({ error: "Database error" });
     }
   });

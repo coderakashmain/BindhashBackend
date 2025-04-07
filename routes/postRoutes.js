@@ -2,17 +2,18 @@ const express = require("express");
 const db = require("../config/db");
 const multer = require("multer");
 const path = require("path");
-const authMiddleware = require("../middleware/authMiddleware");
-const { profileUpload, postUpload } = require("../middleware/multerConfig");
+const {verifyToken} = require("../middleware/authMiddleware");
+const {postUpload} = require('../middleware/multerConfig')
 const { Socket } = require("dgram");
 
 const router = express.Router();
 
 module.exports = (io) => {
   router.post("/create", postUpload.single("media"), async (req, res) => {
-    console.log("Received Body:", req.body);
+
+
     const { user_id, content  } = req.body;
-    console.log("Received File:", req.file);
+
     try {
       
       let mediaType = null;
@@ -29,6 +30,28 @@ module.exports = (io) => {
 
 
       res.json({ message: "Post created successfully!", mediaUrl });
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+
+  router.post("/text/create",  async (req, res) => {
+
+    const { user_id, content  } = req.body;
+
+    const mediaType = 'text';
+    
+    try {
+      
+
+      const sql =
+        "INSERT INTO posts (user_id, content,media_type , created_at) VALUES (?, ?, ?, NOW())";
+      const [results] = await db.query(sql, [user_id, content,mediaType]);
+ 
+
+      res.json({ message: "Post created successfully!"});
     } catch (error) {
       console.log(error);
       res.status(500).json({ error: error.message });
@@ -166,7 +189,7 @@ module.exports = (io) => {
   });
 
   // Like a post
-  router.post("/like", authMiddleware, async (req, res) => {
+  router.post("/like", verifyToken, async (req, res) => {
     const { user_id, post_id } = req.body;
 
     try {
@@ -369,7 +392,7 @@ module.exports = (io) => {
       WHERE posts.created_at >= NOW() - INTERVAL 7 DAY
       GROUP BY posts.id
       ORDER BY like_count DESC
-      LIMIT 5;
+      LIMIT 10;
     `;
 
       const [results] = await db.query(sql);
