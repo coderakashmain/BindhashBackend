@@ -327,6 +327,7 @@ router.post("/login", async (req, res) => {
       {
         id: matchedUser.id,
         username: matchedUser.username,
+        fullname : matchedUser.fullname,
         profile_pic: matchedUser.profile_pic,
       },
       process.env.JWT_SECRET,
@@ -341,11 +342,12 @@ router.post("/login", async (req, res) => {
     });
 
     res.json({
-      token,
       user: {
         id: matchedUser.id,
         username: matchedUser.username,
         email: matchedUser.email,
+        fullname : matchedUser.fullname,
+        profile_pic: matchedUser.profile_pic,
       },
     });
   } catch (err) {

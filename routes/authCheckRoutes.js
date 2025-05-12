@@ -20,7 +20,7 @@ router.get("/check", verifyToken,async (req, res) => {
 
   // Corrected SQL query
   try {
-    const [userResults] = await db.query("SELECT * FROM users WHERE id = ?", [userid]);
+    const [userResults] = await db.query("SELECT id,username,email,profile_pic,created_at,fullname,gender FROM users WHERE id = ?", [userid]);
 
     if (userResults.length === 0) {
       return res.status(404).json({ authenticated: false, message: "User not found" });
@@ -36,6 +36,7 @@ const user = {
   ...userResults[0],
   bio: bioResults.length > 0 ? bioResults[0] : {} // If no bio exists, return an empty object
 };
+
 
 
     
