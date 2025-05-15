@@ -20,8 +20,8 @@ router.post("/register/otpsend", async (req, res) => {
   const otp = crypto.randomInt(100000, 999999).toString();
   const otpExpires = new Date(Date.now() + 10 * 60000);
 
+  const connection = await db.getConnection();
   try {
-    const connection = await db.getConnection();
 
     // Check if user exists
     const [user] = await connection.query(
@@ -46,15 +46,15 @@ router.post("/register/otpsend", async (req, res) => {
         [otp, otpExpires, now, email]
       );
     } else {
-      console.log(email);
+
 
       await connection.query(
         "INSERT INTO newusers (gmail, otp, otpExpires, lastOtpTime, otp_id) VALUES (?, ?, ?, ?, UUID())",
         [email, otp, otpExpires, new Date()]
       );
     }
+   
 
-    connection.release();
 
     // Send OTP email
     const mailOptions = {
@@ -85,6 +85,10 @@ router.post("/register/otpsend", async (req, res) => {
     console.error("Error sending OTP:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
+   finally{
+    if(connection)  connection.release();
+
+    }
 });
 
 router.post("/verifyotp", async (req, res) => {
@@ -94,8 +98,8 @@ router.post("/verifyotp", async (req, res) => {
     return res.status(400).json({ error: "Email and OTP are required!" });
   }
 
+  const connection = await db.getConnection();
   try {
-    const connection = await db.getConnection();
 
     // Find a matching OTP
     const [otpRecord] = await connection.query(
@@ -134,6 +138,10 @@ router.post("/verifyotp", async (req, res) => {
     console.error("Error verifying OTP:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
+   finally{
+     if(connection) connection.release();
+
+    }
 });
 
 router.post("/setpassword", async (req, res) => {
@@ -143,8 +151,8 @@ router.post("/setpassword", async (req, res) => {
     return res.status(400).json({ error: "Email and password are required!" });
   }
 
+  const connection = await db.getConnection();
   try {
-    const connection = await db.getConnection();
     // Hash the password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -188,6 +196,10 @@ router.post("/setpassword", async (req, res) => {
     console.error("Error setting password:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
+   finally{
+     if(connection) connection.release();
+
+    }
 });
 
 router.post("/setusername",newuserverify, async (req, res) => {
@@ -209,8 +221,8 @@ router.post("/setusername",newuserverify, async (req, res) => {
       .json({ error: "Email, username, and full name are required!" });
   }
 
+  const connection = await db.getConnection();
   try {
-    const connection = await db.getConnection();
 
     // Check if user exists
     const [user] = await connection.query(
@@ -239,7 +251,7 @@ router.post("/setusername",newuserverify, async (req, res) => {
       [username, fullName, userid]
     );
 
-    connection.release();
+ 
     return res.json({
       success: true,
       message: "Username & Full Name set successfully!",
@@ -248,6 +260,10 @@ router.post("/setusername",newuserverify, async (req, res) => {
     console.error("Error setting username:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
+   finally{
+     if(connection) connection.release();
+
+    }
 });
 
 
@@ -267,12 +283,12 @@ router.post("/setgender", newuserverify,async (req, res) => {
   const userid = req.user.id;
   const email = req.user.email;
 
+  
   try {
-    const connection = await db.getConnection();
 
     // Update gender in the database
-    await connection.query("UPDATE users SET gender = ? WHERE id = ?", [gender, userid]);
-    connection.release();
+    await db.query("UPDATE users SET gender = ? WHERE id = ?", [gender, userid]);
+
 
     return res.json({ success: true, message: "Gender updated successfully!" });
   } catch (err) {
@@ -364,22 +380,24 @@ router.post("/logout", (req, res) => {
 
 router.get('/accounts', async (req, res) => {
   const { email } = req.query;
-  console.log(email)
+
   if (!email) {
     return res.status(400).json({ error: 'Email is required' });
   }
 
+
   try {
-    const connection = await db.getConnection();
     const sql = 'SELECT username, profile_pic,email FROM users WHERE email = ?';
-    const [results] = await connection.query(sql, [email]);  // <-- FIXED
-    connection.release(); // <-- Important
+    const [results] = await db.query(sql, [email]);  // <-- FIXED
+   
 
     res.json(results);  // <-- FIXED
   } catch (err) {
     console.error("Error fetching accounts:", err);
     return res.status(500).json({ error: "Database error" });
   }
+
+ 
 
   
 });
