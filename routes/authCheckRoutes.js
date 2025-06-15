@@ -20,7 +20,7 @@ router.get("/check", verifyToken,async (req, res) => {
 
   // Corrected SQL query
   try {
-    const [userResults] = await db.query("SELECT id,username,email,profile_pic,created_at,fullname,gender FROM users WHERE id = ?", [userid]);
+    const [userResults] = await db.query("SELECT id,username,email,profile_pic,created_at,fullname,gender,visibility FROM users WHERE id = ?", [userid]);
 
     if (userResults.length === 0) {
       return res.status(404).json({ authenticated: false, message: "User not found" });

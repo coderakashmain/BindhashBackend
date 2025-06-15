@@ -7,7 +7,11 @@ const { transporter } = require("../middleware/mailProvider");
 const crypto = require("crypto");
 require("dotenv").config();
 
+
 const router = express.Router();
+
+module.exports = (io) => {
+
 
 // Register User
 router.post("/register/otpsend", async (req, res) => {
@@ -402,4 +406,40 @@ router.get('/accounts', async (req, res) => {
   
 });
 
-module.exports = router;
+
+///Mode swithcer api
+
+router.post('/modeswitcher',verifyToken, async(req,res)=>{
+  const {mode} = req.body;
+  const userId = req.user.id;
+  
+
+  if (!['self', 'anonymous'].includes(mode)) {
+  return res.status(400).json({ error: 'Invalid mode' });
+}
+
+try{
+const query = 'UPDATE users SET visibility = ? WHERE id = ?'
+
+
+  const [results] = await db.query(query,[mode,userId]);
+  
+ 
+  
+  res.status(200).json({message : "Mode Change",mode : mode, userId : userId});
+
+
+
+}catch(err){
+  console.error('Database Error',err);
+  res.status(500).json({error : 'Database error'})
+
+}
+
+
+})
+
+
+return router;
+
+ }

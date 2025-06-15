@@ -1,24 +1,21 @@
 const express = require("express");
+const axios = require("axios");
 const db = require("../config/db");
 const multer = require("multer");
 const path = require("path");
-const {verifyToken} = require("../middleware/authMiddleware");
-const {postUpload} = require('../middleware/multerConfig')
+const { verifyToken } = require("../middleware/authMiddleware");
+const { postUpload } = require("../middleware/multerConfig");
 const { Socket } = require("dgram");
 
 const router = express.Router();
 
 module.exports = (io) => {
   router.post("/create", postUpload.single("media"), async (req, res) => {
-
-
-    const { user_id, content  } = req.body;
+    const { user_id, content } = req.body;
 
     try {
-      
       let mediaType = null;
 
-   
       if (req.file && req.file.path) {
         mediaUrl = req.file.path; // Cloudinary URL
         mediaType = req.file.mimetype.startsWith("image/") ? "image" : "video";
@@ -26,8 +23,12 @@ module.exports = (io) => {
 
       const sql =
         "INSERT INTO posts (user_id, content, image,media_type , created_at) VALUES (?, ?, ?,?, NOW())";
-      const [results] = await db.query(sql, [user_id, content, mediaUrl,mediaType]);
-
+      const [results] = await db.query(sql, [
+        user_id,
+        content,
+        mediaUrl,
+        mediaType,
+      ]);
 
       res.json({ message: "Post created successfully!", mediaUrl });
     } catch (error) {
@@ -36,22 +37,17 @@ module.exports = (io) => {
     }
   });
 
+  router.post("/text/create", async (req, res) => {
+    const { user_id, content } = req.body;
 
-  router.post("/text/create",  async (req, res) => {
+    const mediaType = "text";
 
-    const { user_id, content  } = req.body;
-
-    const mediaType = 'text';
-    
     try {
-      
-
       const sql =
         "INSERT INTO posts (user_id, content,media_type , created_at) VALUES (?, ?, ?, NOW())";
-      const [results] = await db.query(sql, [user_id, content,mediaType]);
- 
+      const [results] = await db.query(sql, [user_id, content, mediaType]);
 
-      res.json({ message: "Post created successfully!"});
+      res.json({ message: "Post created successfully!" });
     } catch (error) {
       console.log(error);
       res.status(500).json({ error: error.message });
@@ -59,12 +55,11 @@ module.exports = (io) => {
   });
 
   // Get All Posts
-  router.get("/", async (req, res) => {
+  router.get("/", verifyToken, async (req, res) => {
     const userId = Number(req.query.userId) || 0;
     const limit = parseInt(req.query.limit) || 5;
     const page = parseInt(req.query.page) || 1;
     const offset = (page - 1) * limit;
-
 
     try {
       const sql = `
@@ -89,14 +84,8 @@ module.exports = (io) => {
         CASE 
             WHEN comments.id IS NOT NULL 
             THEN JSON_OBJECT(
-                'comment_id', comments.id,
-                'comment_text', comments.comment,
-                'comment_likes', comments.likes,
-                'comment_created_at', comments.created_at,
-                'comment_pinned', comments.pinned,
-                'commenter_id', comment_users.id,
-                'commenter_username', comment_users.username,
-                'commenter_pic', comment_users.profile_pic
+                'parent_comment_id',comments.parent_comment_id
+                
             ) 
             ELSE  JSON_OBJECT()  
         END
@@ -162,7 +151,7 @@ module.exports = (io) => {
 
         `;
 
-      const params = [userId, userId,userId];
+      const params = [userId, userId, userId];
 
       // Debugging - Check if parameters are valid
 
@@ -170,11 +159,65 @@ module.exports = (io) => {
         return res.status(400).json({ error: "Invalid query parameters" });
       }
 
-      const [results] = await db.execute(sql, params);
+      const [resultsdata] = await db.execute(sql, params);
+
+      const results = resultsdata.map((item) => {
+        // Only clean if it's a post and image exists
+        if (item.image) {
+          const isImage =
+            /\.(jpg|jpeg|png|gif)$/i.test(item.image) ||
+            item.image.includes("/image/");
+
+          if (!isImage) {
+            item.image = null;
+          }
+        }
+        return item;
+      });
+
       res.json(results);
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/video/stream/:postId", async (req, res) => {
+    const { postId } = req.params;
+    const range = req.headers.range;
+
+    if (!range) return res.status(416).send("Range header required");
+
+    try {
+      const [rows] = await db.query("SELECT image FROM posts WHERE id = ?", [
+        postId,
+      ]);
+
+      if (!rows.length) return res.status(404).send("Video not found");
+
+      const videoUrl = rows[0].image;
+
+      // Request partial content from Cloudinary
+      const cloudinaryResponse = await axios({
+        method: "GET",
+        url: videoUrl,
+        responseType: "stream",
+        headers: {
+          Range: range,
+        },
+      });
+
+      res.writeHead(206, {
+        "Content-Range": cloudinaryResponse.headers["content-range"],
+        "Accept-Ranges": "bytes",
+        "Content-Length": cloudinaryResponse.headers["content-length"],
+        "Content-Type": "video/mp4",
+      });
+
+      cloudinaryResponse.data.pipe(res);
+    } catch (err) {
+      console.error("Error streaming video:", err.message);
+      res.status(500).send("Internal Server Error");
     }
   });
 
@@ -215,7 +258,51 @@ module.exports = (io) => {
     }
   });
 
-  router.post("/comment", async (req, res) => {
+
+router.get("/comments/fetch", async (req, res) => {
+  try {
+    const { post_id } = req.query;
+
+    const sql = `
+      SELECT c.id AS comment_id, c.comment, c.likes, c.pinned, c.created_at,
+             u.id AS commenter_id, u.username AS commenter_username, u.profile_pic AS commenter_pic,
+             c.parent_comment_id
+      FROM comments c
+      JOIN users u ON c.user_id = u.id
+      WHERE c.post_id = ?
+      ORDER BY c.pinned DESC, c.likes DESC, c.created_at DESC;
+    `;
+
+    const [rows] = await db.query(sql, [post_id]);
+
+  
+    const commentMap = {};
+    rows.forEach(row => {
+      commentMap[row.comment_id] = { ...row, replies: [] };
+    });
+
+
+    const nestedComments = [];
+    rows.forEach(row => {
+      if (row.parent_comment_id) {
+        const parent = commentMap[row.parent_comment_id];
+        if (parent) {
+          parent.replies.push(commentMap[row.comment_id]);
+        }
+      } else {
+        nestedComments.push(commentMap[row.comment_id]);
+      }
+    });
+
+    res.json(nestedComments);
+  } catch (error) {
+    console.error("Error fetching comments:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+  router.post("/comment/insert", async (req, res) => {
     try {
       const { user_id, post_id, comment, parent_comment_id } = req.body;
 
@@ -231,12 +318,11 @@ module.exports = (io) => {
         parent_comment_id || null,
       ]);
 
-      // Get the newly added comment details
       const newComment = {
         comment_id: result.insertId,
         post_id,
         user_id,
-        comment_text: comment,
+        comment: comment,
         likes: 0,
         pinned: false,
         parent_comment_id,

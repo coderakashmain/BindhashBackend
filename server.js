@@ -13,6 +13,8 @@ const roomsRoutes = require("./routes/roomsRoutes");
 const authpostFuntionRoutes = require("./routes/authpostFuntionRoutes");
 const socketManager = require("./socketHandlers")
 const reportsRouter = require('./routes/reportsRoutes');
+const feedbackRoutes = require('./routes/authFeedback');
+
 const path = require("path");
 const cookieParser = require("cookie-parser");
 
@@ -41,7 +43,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authRoutes(io));
 app.use("/api/posts", postRoutes(io));
 app.use("/api/auth-check", authCheckRoutes);
 app.use("/api/users", userRoutes);
@@ -52,6 +54,7 @@ app.use("/api/polls", pollRoutes(io));
 app.use("/api/postfuntion", authpostFuntionRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/reports",reportsRouter);
+app.use("/api/feedback",feedbackRoutes);
 socketManager(io);
 
 

@@ -69,6 +69,7 @@ module.exports = (io, socket) => {
 
   socket.on("random_stranger_left", () => {
     const roomId = socket.data.roomId;
+
     if (roomId) {
       socket.to(roomId).emit("random_stranger_left", { userId: socket.data.userId });
       socket.leave(roomId);
@@ -106,6 +107,7 @@ module.exports = (io, socket) => {
 
   
     if (roomId) {
+        
       socket.to(roomId).emit("random_stranger_left", { userId: socket.data.userId });
       socket.leave(roomId);
     }

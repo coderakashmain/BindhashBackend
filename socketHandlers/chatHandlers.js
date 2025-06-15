@@ -3,14 +3,16 @@ const db = require("../config/db");
 module.exports = (io,socket)=>{
 
     socket.on("sendMessage", async (data) => {
-    const { sender_id, receiver_id, id, message } = data;
-
+    const { sender_id, receiver_id, id, message,created_at } = data;
+  
     if (onlineUsers[receiver_id]) {
-      io.to(onlineUsers[receiver_id]).emit("privateMessage", {
+  
+      io.emit("privateMessage", {
         message_id: id,
         sender_id,
         receiver_id,
         message,
+        created_at,
         status: "delivered",
       });
       // Update status to "delivered" in DB
@@ -20,12 +22,12 @@ module.exports = (io,socket)=>{
     }
 
     // Notify sender that the message is sent
-    if (onlineUsers[sender_id]) {
-      io.to(onlineUsers[sender_id]).emit("messageStatus", {
-        message_id: id,
-        status: "sent",
-      });
-    }
+    // if (onlineUsers[sender_id]) {
+    //   io.to(onlineUsers[sender_id]).emit("messageStatus", {
+    //     message_id: id,
+    //     status: "sent",
+    //   });
+    // }
   });
 
 
