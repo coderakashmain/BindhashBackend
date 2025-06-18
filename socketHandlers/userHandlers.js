@@ -11,8 +11,8 @@ module.exports = (io, socket)=> {
     global.onlineUsers[userId] = socket.id;
     // console.log(`User ${userId} added with socket ID ${socket.id}`);
     sendOfflineMessagesToUser(io,userId, socket.id);
-    console.log("Current Online Users:");
-    console.table(global.onlineUsers);
+    // console.log("Current Online Users:");
+    // console.table(global.onlineUsers);
   });
 
 

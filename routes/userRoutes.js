@@ -16,8 +16,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-
-
 router.get("/userlist", async (req, res) => {
   const { userId } = req.query; // Get logged-in user ID
 
@@ -26,9 +24,22 @@ router.get("/userlist", async (req, res) => {
   }
 
   try {
-    const sql = "SELECT id, username, profile_pic FROM users WHERE id != ?";
+    const sql = `SELECT u.id, 
+    CASE 
+        WHEN u.visibility = 'anonymous' THEN 'anonymous'
+        ELSE u.username
+      END AS username,
+      
+      CASE 
+        WHEN u.visibility = 'anonymous' THEN NULL
+        ELSE u.profile_pic
+      END AS profile_pic,
+       
+       u.visibility,
+      EXISTS (SELECT 1 FROM followers f WHERE f.follower_id = ? AND f.following_id = u.id) AS isFollowing
+    FROM users as u WHERE u.id != ?`;
 
-    const [result] = await db.query(sql, [userId]); // Use promise-based query
+    const [result] = await db.query(sql, [userId, userId]); // Use promise-based query
 
     res.json(result); // Return the result array
   } catch (err) {
@@ -36,8 +47,6 @@ router.get("/userlist", async (req, res) => {
     return res.status(500).json({ error: "Database error" });
   }
 });
-
-
 
 router.post(
   "/upload-profile",
@@ -92,11 +101,9 @@ router.post(
         // Update the new profile picture
         const sqlUpdate = "UPDATE users SET profileback_pic = ? WHERE id = ?";
         await db.query(sqlUpdate, [profilePicPath, userid]);
-      
+
         res.json({ profileback_pic: profilePicPath });
       }
-
-    
     } catch (error) {
       console.error("Database or Cloudinary error:", error);
       return res.status(500).json({ error: "Internal Server Error" });
@@ -126,7 +133,6 @@ router.get("/followers-count", async (req, res) => {
   }
 });
 
-
 router.get("/followers-list", async (req, res) => {
   const { userId, type } = req.query;
 
@@ -137,13 +143,47 @@ router.get("/followers-list", async (req, res) => {
   let sql;
   if (type === "followers") {
     sql = `
-      SELECT users.id, users.fullname, users.username ,users.profile_pic
+      SELECT 
+      users.id, 
+ 
+      CASE 
+        WHEN users.visibility = 'anonymous' THEN "Anonymous"
+        ELSE users.fullname
+      END AS fullname,
+      
+      CASE 
+        WHEN users.visibility = 'anonymous' THEN 'anonymous'
+        ELSE users.username
+      END AS username,
+      
+      CASE 
+        WHEN users.visibility = 'anonymous' THEN NULL
+        ELSE users.profile_pic
+      END AS profile_pic,
+      
+      users.visibility
       FROM followers
       JOIN users ON followers.follower_id = users.id
       WHERE followers.following_id = ?`;
   } else if (type === "following") {
     sql = `
-      SELECT users.id, users.fullname, users.username ,users.profile_pic
+      SELECT users.id,
+     CASE 
+        WHEN users.visibility = 'anonymous' THEN 'Anonymous'
+        ELSE users.fullname
+      END AS fullname,
+      
+      CASE 
+        WHEN users.visibility = 'anonymous' THEN 'anonymous'
+        ELSE users.username
+      END AS username,
+      
+      CASE 
+        WHEN users.visibility = 'anonymous' THEN NULL
+        ELSE users.profile_pic
+      END AS profile_pic,
+       
+       users.visibility
       FROM followers
       JOIN users ON followers.following_id = users.id
       WHERE followers.follower_id = ?`;
@@ -159,12 +199,6 @@ router.get("/followers-list", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
-
-
-
-
-
-
 
 router.post("/follow", async (req, res) => {
   const { followerId, followingId } = req.body;
@@ -250,28 +284,44 @@ router.get("/suggested-users", async (req, res) => {
   }
 
   const sql = `
-    WITH UserFollowers AS (
-        SELECT following_id FROM followers WHERE follower_id = ?
-    ),
-    Mutuals AS (
-        SELECT DISTINCT u.id, u.username, u.profile_pic, COUNT(f.follower_id) AS mutual_count
-        FROM users u
-        JOIN followers f ON u.id = f.follower_id
-        WHERE f.following_id IN (SELECT following_id FROM UserFollowers)
-          AND u.id != ?
-          AND u.id NOT IN (SELECT following_id FROM UserFollowers)
-        GROUP BY u.id
-        ORDER BY mutual_count DESC
-        LIMIT 5
-    )
-    SELECT * FROM Mutuals
-    UNION
-    SELECT id, username, profile_pic, 0 AS mutual_count FROM users
-    WHERE id != ?
-      AND id NOT IN (SELECT following_id FROM UserFollowers)
-      AND id NOT IN (SELECT id FROM Mutuals)
-    ORDER BY RAND()
-    LIMIT 5;
+ WITH UserFollowers AS (
+    SELECT following_id FROM followers WHERE follower_id = ?
+),
+Mutuals AS (
+    SELECT DISTINCT u.id, u.username, u.profile_pic, u.visibility, COUNT(f.follower_id) AS mutual_count
+    FROM users u
+    JOIN followers f ON u.id = f.follower_id
+    WHERE f.following_id IN (SELECT following_id FROM UserFollowers)
+      AND u.id != ?
+      AND u.id NOT IN (SELECT following_id FROM UserFollowers)
+    GROUP BY u.id
+    ORDER BY mutual_count DESC
+    LIMIT 5
+)
+SELECT * FROM Mutuals
+
+UNION
+
+SELECT 
+  v.id, 
+  CASE 
+    WHEN v.visibility = 'anonymous' THEN 'Anonymous'
+    ELSE v.username
+  END AS username,
+  CASE 
+    WHEN v.visibility = 'anonymous' THEN NULL
+    ELSE v.profile_pic
+  END AS profile_pic,
+  v.visibility,
+  0 AS mutual_count
+FROM users AS v
+WHERE v.id != ?
+  AND v.id NOT IN (SELECT following_id FROM UserFollowers)
+  AND v.id NOT IN (SELECT id FROM Mutuals)
+ORDER BY RAND()
+LIMIT 5;
+
+
   `;
 
   try {
@@ -282,9 +332,6 @@ router.get("/suggested-users", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
-
-
-
 
 router.get("/leaderboard", async (req, res) => {
   const { userId } = req.query; // Get user ID (optional)
@@ -306,7 +353,7 @@ router.get("/leaderboard", async (req, res) => {
       COALESCE(share_count.total_shares, 0) AS total_shares,
       COALESCE(followers_count.total_followers, 0) AS total_followers,
 
-      -- ✅ Correct engagement score calculation
+  
       (COALESCE(like_count.total_likes, 0) * 1 + 
       COALESCE(comment_count.total_comments, 0) * 2 + 
       COALESCE(share_count.total_shares, 0) * 3 + 
@@ -433,36 +480,35 @@ router.get("/leaderboard", async (req, res) => {
   }
 });
 
-
-
 router.get("/tags", async (req, res) => {
   const { user_id } = req.query;
   try {
-      const [tags] = await db.query("SELECT tag FROM user_tags WHERE user_id = ?", [user_id]);
-      res.json(tags.map(t => t.tag));
+    const [tags] = await db.query(
+      "SELECT tag FROM user_tags WHERE user_id = ?",
+      [user_id]
+    );
+    res.json(tags.map((t) => t.tag));
   } catch (error) {
-      console.error("Error fetching tags:", error);
-      res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error fetching tags:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 router.post("/tags", async (req, res) => {
   const { user_id, tags } = req.body;
   try {
-      await db.query("DELETE FROM user_tags WHERE user_id = ?", [user_id]);
-      if(tags.length > 0){
-        const values = tags.map(tag => [user_id, tag]);
-        await db.query("INSERT INTO user_tags (user_id, tag) VALUES ?", [values]);
-      } // Clear old tags
-     
+    await db.query("DELETE FROM user_tags WHERE user_id = ?", [user_id]);
+    if (tags.length > 0) {
+      const values = tags.map((tag) => [user_id, tag]);
+      await db.query("INSERT INTO user_tags (user_id, tag) VALUES ?", [values]);
+    } // Clear old tags
 
-      res.json({ success: true });
+    res.json({ success: true });
   } catch (error) {
-      console.error("Error saving tags:", error);
-      res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error saving tags:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 router.put("/profiledit/:userId", async (req, res) => {
   const { userId } = req.params;
@@ -472,80 +518,80 @@ router.put("/profiledit/:userId", async (req, res) => {
   const connection = await db.getConnection(); // Get a DB connection
 
   try {
-      await connection.beginTransaction(); 
+    await connection.beginTransaction();
 
-      // Update only changed fields in 'users' table
-      if (fullName || username) {
-          const fieldsToUpdate = [];
-          const values = [];
+    // Update only changed fields in 'users' table
+    if (fullName || username) {
+      const fieldsToUpdate = [];
+      const values = [];
 
-          if (fullName) {
-              fieldsToUpdate.push("fullname = ?");
-              values.push(fullName);
-          }
-          if (username) {
-              fieldsToUpdate.push("username = ?");
-              values.push(username);
-          }
-
-          if (fieldsToUpdate.length > 0) {
-              values.push(userId); // Add userId to the query
-              const sql = `UPDATE users SET ${fieldsToUpdate.join(", ")} WHERE id = ?`;
-              await connection.execute(sql, values);
-          }
+      if (fullName) {
+        fieldsToUpdate.push("fullname = ?");
+        values.push(fullName);
+      }
+      if (username) {
+        fieldsToUpdate.push("username = ?");
+        values.push(username);
       }
 
-      // Update only changed fields in 'user_bio' table
-      if (bio) {
-        const fieldsToUpdate = [];
-        const values = [];
-        
-    
-        Object.entries(bio).forEach(([key, value]) => {
-            if (value) {
-                fieldsToUpdate.push(`${key} = ?`);
-                values.push(value);
-            }
-        });
-    
-        if (fieldsToUpdate.length > 0) {
-            // Check if bio exists for the user
-            const [existingBio] = await connection.execute(
-                "SELECT user_id FROM user_bio WHERE user_id = ?",
-                [userId]
-            );
-    
-            if (existingBio.length > 0) {
-                // If bio exists, update it
-                values.push(userId);
-                const sql = `UPDATE user_bio SET ${fieldsToUpdate.join(", ")} WHERE user_id = ?`;
-                await connection.execute(sql, values);
-            } else {
-                // If bio does not exist, insert a new row
-                const columns = Object.keys(bio).join(", ");
-                const placeholders = Object.keys(bio).map(() => "?").join(", ");
-                const insertValues = Object.values(bio);
-    
-                const sql = `INSERT INTO user_bio (user_id, ${columns}) VALUES (?, ${placeholders})`;
-                await connection.execute(sql, [userId, ...insertValues]);
-            }
-        }
+      if (fieldsToUpdate.length > 0) {
+        values.push(userId); // Add userId to the query
+        const sql = `UPDATE users SET ${fieldsToUpdate.join(
+          ", "
+        )} WHERE id = ?`;
+        await connection.execute(sql, values);
+      }
     }
 
-      await connection.commit(); // Commit transaction
-      res.json({ success: true, message: "Profile updated successfully" });
+    // Update only changed fields in 'user_bio' table
+    if (bio) {
+      const fieldsToUpdate = [];
+      const values = [];
 
+      Object.entries(bio).forEach(([key, value]) => {
+        if (value) {
+          fieldsToUpdate.push(`${key} = ?`);
+          values.push(value);
+        }
+      });
+
+      if (fieldsToUpdate.length > 0) {
+        // Check if bio exists for the user
+        const [existingBio] = await connection.execute(
+          "SELECT user_id FROM user_bio WHERE user_id = ?",
+          [userId]
+        );
+
+        if (existingBio.length > 0) {
+          // If bio exists, update it
+          values.push(userId);
+          const sql = `UPDATE user_bio SET ${fieldsToUpdate.join(
+            ", "
+          )} WHERE user_id = ?`;
+          await connection.execute(sql, values);
+        } else {
+          // If bio does not exist, insert a new row
+          const columns = Object.keys(bio).join(", ");
+          const placeholders = Object.keys(bio)
+            .map(() => "?")
+            .join(", ");
+          const insertValues = Object.values(bio);
+
+          const sql = `INSERT INTO user_bio (user_id, ${columns}) VALUES (?, ${placeholders})`;
+          await connection.execute(sql, [userId, ...insertValues]);
+        }
+      }
+    }
+
+    await connection.commit(); // Commit transaction
+    res.json({ success: true, message: "Profile updated successfully" });
   } catch (error) {
-      await connection.rollback(); // Rollback on failure
-      console.error("Update failed:", error);
-      res.status(500).json({ success: false, message: "Server error" });
-
+    await connection.rollback(); // Rollback on failure
+    console.error("Update failed:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   } finally {
-      connection.release(); // Release connection
+    connection.release(); // Release connection
   }
 });
-
-
-
 
 module.exports = router;

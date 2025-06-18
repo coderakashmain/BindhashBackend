@@ -15,10 +15,14 @@ module.exports = (io) => {
 
 // Register User
 router.post("/register/otpsend", async (req, res) => {
-  const { email } = req.body;
+  const { email ,isChecked} = req.body;
 
   if (!email) {
     return res.status(400).json({ error: "Email is required!" });
+  }
+
+  if(!isChecked){
+     return res.status(400).json({ error: "Please accept the Terms & Conditions to continue. " });
   }
 
   const otp = crypto.randomInt(100000, 999999).toString();
@@ -27,6 +31,7 @@ router.post("/register/otpsend", async (req, res) => {
   const connection = await db.getConnection();
   try {
 
+       await connection.beginTransaction();
     // Check if user exists
     const [user] = await connection.query(
       "SELECT lastOtpTime FROM newusers WHERE gmail = ?",
@@ -87,6 +92,7 @@ router.post("/register/otpsend", async (req, res) => {
     return res.json({ success: true, message: "OTP sent successfully!" });
   } catch (err) {
     console.error("Error sending OTP:", err);
+    await connection.rollback();
     return res.status(500).json({ error: "Internal Server Error" });
   }
    finally{
