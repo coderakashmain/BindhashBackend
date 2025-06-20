@@ -73,8 +73,19 @@ module.exports = (io) => {
                     posts.image, 
                     posts.media_type,
                     posts.created_at, 
-                    users.username AS post_username, 
-                    users.profile_pic AS post_user_pic, 
+                    posts.visibility as post_visibility,
+                    CASE
+                      WHEN  posts.visibility = 'anonymous' THEN  'anonymous'
+                      ELSE users.username
+                    END AS post_username,
+
+                    CASE 
+                      WHEN posts.visibility = 'anonymous' THEN  NULL
+                      ELSE users.profile_pic
+                    END AS post_user_pic,
+
+                   
+
                     users.id AS post_user_id,
                     (SELECT COUNT(*) FROM posts WHERE user_id = users.id) AS post_count,
                     IFNULL(like_count.count, 0) AS like_count,
@@ -111,12 +122,21 @@ module.exports = (io) => {
                     NULL AS post_id,
                     polls.id AS poll_id, 
                     polls.question AS content, 
+                    polls.visibility AS post_visibility,
                     NULL AS image, 
-                         NULL AS media_type,
+                    NULL AS media_type,
                        polls.created_at, 
-          poll_users.username AS post_username, 
-          poll_users.profile_pic AS post_user_pic, 
-          poll_users.id AS post_user_id,
+                       CASE 
+                          WHEN polls.visibility = 'anonymous' THEN 'anonymous'
+                          ELSE poll_users.username
+                        END AS post_username,
+                       CASE 
+                          WHEN polls.visibility = 'anonymous' THEN NULL
+                          ELSE poll_users.profile_pic
+                        END AS post_user_pic,
+
+          
+                    poll_users.id AS post_user_id,
                     0 AS post_count,
                     IFNULL((SELECT COUNT(*) FROM poll_votes WHERE poll_votes.poll_id = polls.id), 0) AS like_count,
                     IF(MAX(poll_votes.user_id IS NOT NULL), 1, 0) AS is_liked,

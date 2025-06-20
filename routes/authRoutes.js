@@ -69,13 +69,13 @@ router.post("/register/otpsend", async (req, res) => {
     const mailOptions = {
       to: email,
       from: process.env.EMAIL_USER,
-      subject: "Bingbox OTP for Creating a New Account",
+      subject: "Bindhash OTP for Creating a New Account",
       html: `
       <html> 
       <body> 
         <div style="background-color: #f0f0f0; padding: 20px; font-family: Arial, sans-serif;">
           <div style="background-color: #ffffff; padding: 20px; border-radius: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 600px; margin: auto;">
-            <h2 style="color: #333;">Welcome to Bingbox!</h2>
+            <h2 style="color: #333;">Welcome to Bindhash!</h2>
             <p style="color: #555;">Thank you for signing up! Please use the following OTP to complete your registration:</p>
             <h3 style="color: #007bff;">${otp}</h3>
             <p style="color: #555;">If you did not request this, please ignore this email.</p>
