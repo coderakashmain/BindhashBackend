@@ -25,4 +25,4 @@ jobs:
 
       - name: Run backend.sh on EC2
         run: |
-          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'cd /home/ubuntu/bindhash && ./backend.sh'
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'cd /home/ubuntu && ./backend.sh'
