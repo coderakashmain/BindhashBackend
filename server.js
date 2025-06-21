@@ -29,7 +29,9 @@ const io = new Server(server, {
    pingInterval: 10000,
    pingTimeout: 5000, 
   cors: {
-    origin: process.env.NODE_ENV  === 'production' ? " .bindhash.xyz " : "http://localhost:5173",
+     origin: process.env.NODE_ENV === 'production' 
+      ? "https://bindhash.xyz" 
+      : "http://localhost:5173",
     methods: ["GET", "POST"],
     credentials: true,
   },
