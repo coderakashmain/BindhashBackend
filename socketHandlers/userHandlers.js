@@ -24,10 +24,10 @@ module.exports = (io, socket)=> {
       }
     }
     io.emit("onlineUsers", Object.keys(global.onlineUsers));
-    console.log("User disconnected:", socket.id);
+    // console.log("User disconnected:", socket.id);
 
-    console.log("Updated Online Users:");
-    console.table(global.onlineUsers);
+    // console.log("Updated Online Users:");
+    // console.table(global.onlineUsers);
   });
   
 };
