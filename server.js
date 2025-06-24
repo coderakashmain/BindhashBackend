@@ -31,7 +31,7 @@ const io = new Server(server, {
   origin: (origin, callback) => {
     const allowedOrigins = [
       "https://bindhash.xyz",
-      "https://beta.bindhash.xyz",
+      "https://www.bindhash.xyz",
       "http://localhost:5173",
     ];
     if (!origin || allowedOrigins.includes(origin)) {

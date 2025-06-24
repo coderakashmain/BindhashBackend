@@ -184,7 +184,7 @@ module.exports = (io) => {
         [email, username, hashedPassword]
       );
 
-      connection.release();
+    
       const userId = result.insertId;
       const token = jwt.sign(
         { id: userId, email }, // use email, not gmail
@@ -202,6 +202,7 @@ module.exports = (io) => {
 
       return res.json({ success: true, message: "Password set successfully!" });
     } catch (err) {
+      await connection.rollback();
       console.error("Error setting password:", err);
       return res.status(500).json({ error: "Internal Server Error" });
     } finally {
