@@ -66,7 +66,7 @@ module.exports = (io) => {
       ]);
       res.json(result);
     } catch (err) {
-      console.log(err);
+      console.error(err);
       return res.status(500).json({ error: "Database error" });
     }
   });
@@ -112,14 +112,14 @@ module.exports = (io) => {
             savedMessage
           );
         }
-        console.log(`User ${receiver_id} is not online.`);
+        // console.log(`User ${receiver_id} is not online.`);
           await connection.commit();
         return res
           .status(200)
           .json({ message: "Message saved, but user is offline" });
       }
 
-         console.log(`User ${receiver_id} is  online.`);
+        //  console.log(`User ${receiver_id} is  online.`);
 
       io.emit("privateMessage", {
         ...savedMessage,

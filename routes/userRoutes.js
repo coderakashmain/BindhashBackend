@@ -53,7 +53,7 @@ router.post(
   profileUpload.single("profile_pic"),
   async (req, res) => {
     const { userid, mainphoto } = req.body;
-    console.log(req.body);
+   
 
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
@@ -327,6 +327,7 @@ LIMIT 5;
 
   try {
     const [results] = await db.query(sql, [userId, userId, userId]);
+    
     res.json(results);
   } catch (error) {
     console.error("Database query error:", error);

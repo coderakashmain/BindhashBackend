@@ -7,8 +7,7 @@ const router = express.Router();
 
 router.post("/create", storyUpload.single("media"), async (req, res) => {
   try {
-    console.log("📝 Received Story Data:", req.body);
-    console.log("📂 Uploaded File:", req.file);
+
 
     const {
       text_content,
@@ -19,7 +18,7 @@ router.post("/create", storyUpload.single("media"), async (req, res) => {
       allowed_users,
       user_id,
     } = req.body;
-    console.log("📂 Uploaded File:", req.file);
+
 
     const media_url = req.file?.path ?? null;
     const media_type = req.file?.mimetype?.split("/")[0] ?? null;
@@ -31,20 +30,20 @@ router.post("/create", storyUpload.single("media"), async (req, res) => {
     const viewPrivacySafe = view_privacy || "public";
     const isAnonymousSafe = is_anonymous === "true" ? 1 : 0;
 
-    // ✅ Fix `allowed_users` handling
+    
     let allowedUsersSafe = null;
 
     if (allowed_users) {
       try {
         allowedUsersSafe = JSON.stringify(JSON.parse(allowed_users));
-        // console.log(allowedUsersSafe);
+      
       } catch (error) {
-        console.error("❌ JSON Parsing Error for allowed_users:", error);
+        console.error("JSON Parsing Error for allowed_users:", error);
         allowedUsersSafe = null; // Fallback to null if parsing fails
       }
     }
 
-    // console.log("📌 Final Insert Values:", {
+    // console.log("Final Insert Values:", {
     //     user_id,
     //     media_url,
     //     media_type,
@@ -74,7 +73,7 @@ router.post("/create", storyUpload.single("media"), async (req, res) => {
       ]
     );
 
-    console.log("Story created successfully!");
+   
     res.status(201).json({
       message: "Story created successfully!",
       story_id: result.insertId,

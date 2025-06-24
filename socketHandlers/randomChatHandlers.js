@@ -101,7 +101,7 @@ module.exports = (io, socket) => {
 
  
   socket.on("disconnect", (reason) => {
-    console.log("User disconnected:", socket.id, reason);
+    // console.log("User disconnected:", socket.id, reason);
 
     const roomId = socket.data.roomId;
 

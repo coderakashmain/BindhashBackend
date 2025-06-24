@@ -58,14 +58,14 @@ module.exports = (io) => {
   // Fetch Polls API
   router.get("/:user_id",verifyToken, async (req, res) => {
     if (!req.user) {
-      console.log("User not found in middleware.");
+ 
       return res.status(401).json({ authenticated: false, message: "No token found" });
     }
     const user_id = req.params.user_id;
-    console.log(user_id)
+ 
 
     try {
-      console.log("user user_id:", user_id);
+   
 
    
 
