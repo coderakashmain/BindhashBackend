@@ -11,9 +11,9 @@ const pollRoutes = require("./routes/pollRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const roomsRoutes = require("./routes/roomsRoutes");
 const authpostFuntionRoutes = require("./routes/authpostFuntionRoutes");
-const socketManager = require("./socketHandlers")
-const reportsRouter = require('./routes/reportsRoutes');
-const feedbackRoutes = require('./routes/authFeedback');
+const socketManager = require("./socketHandlers");
+const reportsRouter = require("./routes/reportsRoutes");
+const feedbackRoutes = require("./routes/authFeedback");
 
 const path = require("path");
 const cookieParser = require("cookie-parser");
@@ -26,14 +26,19 @@ const app = express();
 dotenv.config();
 const server = http.createServer(app);
 const io = new Server(server, {
-   pingInterval: 10000,
-   pingTimeout: 5000, 
-  cors: {
-     origin: process.env.NODE_ENV === 'production' 
-      ? "https://bindhash.xyz" 
-      : "http://localhost:5173",
-    methods: ["GET", "POST"],
-    credentials: true,
+  pingInterval: 10000,
+  pingTimeout: 5000,
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      "https://bindhash.xyz",
+      "https://beta.bindhash.xyz",
+      "http://localhost:5173",
+    ];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
   },
 });
 
@@ -55,10 +60,9 @@ app.use("/api/stories", storyRoutes);
 app.use("/api/polls", pollRoutes(io));
 app.use("/api/postfuntion", authpostFuntionRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-app.use("/api/reports",reportsRouter);
-app.use("/api/feedback",feedbackRoutes);
+app.use("/api/reports", reportsRouter);
+app.use("/api/feedback", feedbackRoutes);
 socketManager(io);
-
 
 webPush.setVapidDetails(
   "mailto:ab791235@gmail.com",
@@ -88,8 +92,6 @@ app.post("/subscribe", (req, res) => {
   userSubscriptions[userId] = subscription;
   res.json({ success: true });
 });
-
-
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
