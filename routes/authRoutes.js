@@ -197,7 +197,7 @@ module.exports = (io) => {
         [email, username, hashedPassword]
       );
 
-      console.log(result);
+     
 
       const userId = result.insertId;
       const token = jwt.sign({ id: userId, email }, process.env.JWT_SECRET, {
