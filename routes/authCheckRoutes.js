@@ -18,9 +18,32 @@ router.get("/check", verifyToken,async (req, res) => {
   const userid = req.user.id;
 
 
-  // Corrected SQL query
+
   try {
-    const [userResults] = await db.query("SELECT id,username,profile_pic,created_at,fullname,gender,visibility FROM users WHERE id = ?", [userid]);
+    const query =  `
+      SELECT c.id as id,
+      CASE 
+        WHEN c.visibility = 'anonymous' THEN 'anonymous'
+        ELSE c.username
+      END AS username,
+
+      CASE 
+        WHEN c.visibility = 'anonymous' THEN NULL 
+        ELSE c.profile_pic
+      END AS profile_pic,
+
+      c.created_at,
+      
+      CASE 
+        WHEN c.visibility  = 'anonymous' THEN 'Anonymous'
+        ELSE c.fullname
+      END AS fullname,
+
+      c.visibility 
+
+      FROM users as c WHERE id = ? 
+    `
+    const [userResults] = await db.query(query, [userid]);
 
     if (userResults.length === 0) {
       return res.status(404).json({ authenticated: false, message: "User not found" });

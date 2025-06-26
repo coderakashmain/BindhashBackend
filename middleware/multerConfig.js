@@ -64,10 +64,33 @@ const pollStorage = new CloudinaryStorage({
   }),
 });
 
+const deleteFromCloudinary = async (publicId) => {
+    try {
+        await cloudinary.uploader.destroy(publicId, { resource_type: "auto" });
+        console.log(`Deleted: ${publicId}`);
+    } catch (error) {
+        console.error("Cloudinary delete error:", error);
+    }
+};
+
+
+const getCloudinaryPublicId = (url, folder = "post_media") => {
+    try {
+        const parts = url.split("/");
+        const filename = parts.pop(); 
+        const [publicId] = filename.split(".");
+
+        return `${folder}/${publicId}`;
+    } catch (error) {
+        console.error("Error extracting publicId:", error);
+        return null;
+    }
+};
+
 
 const profileUpload = multer({ storage: profileStorage });
 const postUpload = multer({ storage: postStorage });
 const pollUpload = multer({ storage: pollStorage });
 const storyUpload = multer({ storage: storyStorage });
 
-module.exports = { profileUpload, postUpload,pollUpload,storyUpload };
+module.exports = { profileUpload, postUpload,pollUpload,storyUpload,deleteFromCloudinary ,getCloudinaryPublicId};

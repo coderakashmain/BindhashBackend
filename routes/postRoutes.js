@@ -4,7 +4,11 @@ const db = require("../config/db");
 const multer = require("multer");
 const path = require("path");
 const { verifyToken } = require("../middleware/authMiddleware");
-const { postUpload } = require("../middleware/multerConfig");
+const {
+  postUpload,
+  deleteFromCloudinary,
+  getCloudinaryPublicId,
+} = require("../middleware/multerConfig");
 const { Socket } = require("dgram");
 
 const router = express.Router();
@@ -37,15 +41,32 @@ module.exports = (io) => {
     }
   });
 
-  router.post("/text/create", async (req, res) => {
-    const { user_id, content } = req.body;
+  router.post("/text/createfailpost", verifyToken, async (req, res) => {
+    const user_id = req.user.id;
+    const { title, description, category, isAnonymous } = req.body;
+
+    const visibility = isAnonymous ? "anonymous" : "public";
 
     const mediaType = "text";
+    const tags = [
+      ...new Set(
+        (description.match(/#\w+/g) || []).map((tag) => tag.toLowerCase())
+      ),
+    ];
+    const tagString = JSON.stringify(tags);
 
     try {
       const sql =
-        "INSERT INTO posts (user_id, content,media_type , created_at) VALUES (?, ?, ?, NOW())";
-      const [results] = await db.query(sql, [user_id, content, mediaType]);
+        "INSERT INTO posts (user_id, content,media_type ,title,category,visibility,tag, created_at) VALUES (?,?,?,?,?,?,?,NOW())";
+      const [results] = await db.query(sql, [
+        user_id,
+        description,
+        mediaType,
+        title,
+        category,
+        visibility,
+        tagString,
+      ]);
 
       res.json({ message: "Post created successfully!" });
     } catch (error) {
@@ -63,115 +84,101 @@ module.exports = (io) => {
 
     try {
       const sql = `
-            SELECT * FROM (
-                -- Fetch Posts
-                SELECT 
-                    'post' AS type,
-                    posts.id AS post_id, 
-                    NULL AS poll_id,
-                    posts.content, 
-                    posts.image, 
-                    posts.media_type,
-                    posts.created_at, 
-                    posts.visibility as post_visibility,
-                    CASE
-                      WHEN  posts.visibility = 'anonymous' THEN  'anonymous'
-                      ELSE users.username
-                    END AS post_username,
+      SELECT * FROM (
+          -- Fetch Posts
+          SELECT 
+              'post' AS type,
+              posts.id AS post_id, 
+              NULL AS poll_id,
+              posts.content, 
+              posts.title, 
+              posts.category, 
+              posts.tag, 
+              posts.image, 
+              posts.media_type,
+              posts.created_at, 
+              posts.visibility AS post_visibility,
+              CASE WHEN posts.visibility = 'anonymous' THEN 'anonymous' ELSE users.username END AS post_username,
+              CASE WHEN posts.visibility = 'anonymous' THEN NULL ELSE users.profile_pic END AS post_user_pic,
+              users.id AS post_user_id,
+              (SELECT COUNT(*) FROM posts WHERE user_id = users.id) AS post_count,
+              IFNULL(like_count.count, 0) AS like_count,
+              IF(MAX(user_likes.user_id IS NOT NULL), 1, 0) AS is_liked,
+              IF(MAX(user_saves.user_id IS NOT NULL), 1, 0) AS is_saved,
+              COALESCE(
+                  JSON_ARRAYAGG(
+                      CASE 
+                          WHEN comments.id IS NOT NULL THEN JSON_OBJECT(
+                              'parent_comment_id', comments.parent_comment_id
+                          )
+                          ELSE JSON_OBJECT()
+                      END
+                  ), JSON_ARRAY()
+              ) AS comments
 
-                    CASE 
-                      WHEN posts.visibility = 'anonymous' THEN  NULL
-                      ELSE users.profile_pic
-                    END AS post_user_pic,
+          FROM posts
+          JOIN users ON posts.user_id = users.id
+          LEFT JOIN (
+              SELECT post_id, COUNT(*) AS count FROM likes GROUP BY post_id
+          ) AS like_count ON like_count.post_id = posts.id
+          LEFT JOIN likes AS user_likes ON user_likes.post_id = posts.id AND user_likes.user_id = ?
+          LEFT JOIN save_posts AS user_saves ON user_saves.post_id = posts.id AND user_saves.user_id = ?
+          LEFT JOIN comments ON comments.post_id = posts.id
+          LEFT JOIN users AS comment_users ON comments.user_id = comment_users.id
+          GROUP BY posts.id, users.id, like_count.count
 
-                   
+          UNION ALL
 
-                    users.id AS post_user_id,
-                    (SELECT COUNT(*) FROM posts WHERE user_id = users.id) AS post_count,
-                    IFNULL(like_count.count, 0) AS like_count,
-                    IF(MAX(user_likes.user_id IS NOT NULL), 1, 0) AS is_liked,
-                    COALESCE(
-    JSON_ARRAYAGG(
-        CASE 
-            WHEN comments.id IS NOT NULL 
-            THEN JSON_OBJECT(
-                'parent_comment_id',comments.parent_comment_id
-                
-            ) 
-            ELSE  JSON_OBJECT()  
-        END
-    ), 
-    JSON_ARRAY()
-) AS comments
+          -- Fetch Polls
+          SELECT 
+              'poll' AS type,
+              NULL AS post_id,
+              polls.id AS poll_id, 
+              polls.question AS content,
+              NULL AS title,           
+              NULL AS tag,               
+              NULL AS category, 
+              polls.visibility AS post_visibility,
+              NULL AS image, 
+              NULL AS media_type,
+              polls.created_at, 
+              CASE WHEN polls.visibility = 'anonymous' THEN 'anonymous' ELSE poll_users.username END AS post_username,
+              CASE WHEN polls.visibility = 'anonymous' THEN NULL ELSE poll_users.profile_pic END AS post_user_pic,
+              poll_users.id AS post_user_id,
+              0 AS post_count,
+              IFNULL((SELECT COUNT(*) FROM poll_votes WHERE poll_votes.poll_id = polls.id), 0) AS like_count,
+              IF(MAX(poll_votes.user_id IS NOT NULL), 1, 0) AS is_liked,
+              0 AS is_saved,  -- polls can't be saved, or set to 0 explicitly
+              COALESCE(
+                  JSON_ARRAYAGG(
+                      CASE 
+                          WHEN poll_options.id IS NOT NULL THEN JSON_OBJECT(
+                              'option_id', poll_options.id,
+                              'option_text', poll_options.option_text,
+                              'votes', poll_options.votes
+                          )
+                          ELSE NULL 
+                      END
+                  ), JSON_ARRAY()
+              ) AS comments
 
-                FROM posts
-                JOIN users ON posts.user_id = users.id
-                LEFT JOIN (
-                    SELECT post_id, COUNT(*) AS count FROM likes GROUP BY post_id
-                ) AS like_count ON like_count.post_id = posts.id
-                LEFT JOIN likes AS user_likes ON user_likes.post_id = posts.id AND user_likes.user_id = ?
-                LEFT JOIN comments ON comments.post_id = posts.id
-                LEFT JOIN users AS comment_users ON comments.user_id = comment_users.id
-                GROUP BY posts.id, users.id, like_count.count
-                
-                UNION ALL
-                
-                -- Fetch Polls
-                SELECT 
-                    'poll' AS type,
-                    NULL AS post_id,
-                    polls.id AS poll_id, 
-                    polls.question AS content, 
-                    polls.visibility AS post_visibility,
-                    NULL AS image, 
-                    NULL AS media_type,
-                       polls.created_at, 
-                       CASE 
-                          WHEN polls.visibility = 'anonymous' THEN 'anonymous'
-                          ELSE poll_users.username
-                        END AS post_username,
-                       CASE 
-                          WHEN polls.visibility = 'anonymous' THEN NULL
-                          ELSE poll_users.profile_pic
-                        END AS post_user_pic,
-
-          
-                    poll_users.id AS post_user_id,
-                    0 AS post_count,
-                    IFNULL((SELECT COUNT(*) FROM poll_votes WHERE poll_votes.poll_id = polls.id), 0) AS like_count,
-                    IF(MAX(poll_votes.user_id IS NOT NULL), 1, 0) AS is_liked,
-                    COALESCE(
-    JSON_ARRAYAGG(
-        CASE 
-            WHEN poll_options.id IS NOT NULL 
-            THEN JSON_OBJECT(
-                'option_id', poll_options.id,
-                'option_text', poll_options.option_text,
-                'votes', poll_options.votes
-            ) 
-            ELSE NULL 
-        END
-    ), 
-    JSON_ARRAY()
-) AS comments
-
-                FROM polls
-                    JOIN users AS poll_users ON polls.user_id = poll_users.id
-                LEFT JOIN poll_votes ON poll_votes.poll_id = polls.id AND poll_votes.user_id = ?
-                LEFT JOIN poll_options ON poll_options.poll_id = polls.id
-                WHERE 
-          polls.visibility = 'public' 
-          OR (polls.visibility = 'followers' AND polls.user_id IN (
-              SELECT following_id  FROM followers WHERE follower_id  = ?
-          ))
-                GROUP BY polls.id, poll_users.id
-            ) AS combined_results
-            ORDER BY created_at DESC
-     LIMIT ${limit} OFFSET ${offset};
+          FROM polls
+          JOIN users AS poll_users ON polls.user_id = poll_users.id
+          LEFT JOIN poll_votes ON poll_votes.poll_id = polls.id AND poll_votes.user_id = ?
+          LEFT JOIN poll_options ON poll_options.poll_id = polls.id
+          WHERE 
+              polls.visibility = 'public' 
+              OR (polls.visibility = 'anonymous' AND polls.user_id IN (
+                  SELECT following_id FROM followers WHERE follower_id = ?
+              ))
+          GROUP BY polls.id, poll_users.id
+      ) AS combined_results
+      ORDER BY (like_count / TIMESTAMPDIFF(MINUTE, created_at, NOW())) DESC
+      LIMIT ${limit} OFFSET ${offset};
 
         `;
 
-      const params = [userId, userId, userId];
+      const params = [userId, userId, userId,userId];
 
       // Debugging - Check if parameters are valid
 
@@ -199,6 +206,93 @@ module.exports = (io) => {
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/single", verifyToken, async (req, res) => {
+    const userId = req.user.id;
+    const postId = Number(req.query.postId);
+
+    if (!postId) {
+      return res.status(400).json({ error: "Missing postId" });
+    }
+
+    try {
+      const query = `
+      SELECT 
+        'post' AS type,
+        posts.id AS post_id, 
+        posts.content, 
+        posts.title, 
+        posts.category, 
+        posts.tag, 
+        posts.image, 
+        posts.media_type,
+        posts.created_at, 
+        posts.visibility AS post_visibility,
+
+        CASE 
+          WHEN posts.visibility = 'anonymous' THEN 'anonymous'
+          ELSE users.username 
+        END AS post_username,
+
+        CASE 
+          WHEN posts.visibility = 'anonymous' THEN NULL
+          ELSE users.profile_pic 
+        END AS post_user_pic,
+
+        users.id AS post_user_id,
+
+        (SELECT COUNT(*) FROM posts WHERE user_id = users.id) AS post_count,
+
+        IFNULL(like_count.count, 0) AS like_count,
+
+        IF(MAX(user_likes.user_id IS NOT NULL), 1, 0) AS is_liked,
+
+        IF(MAX(saved.user_id IS NOT NULL), 1, 0) AS is_saved,
+
+        COALESCE(
+          JSON_ARRAYAGG(
+            CASE 
+              WHEN comments.id IS NOT NULL 
+              THEN JSON_OBJECT(
+                'comment_id', comments.id,
+                'parent_comment_id', comments.parent_comment_id
+              ) 
+              ELSE JSON_OBJECT()  
+            END
+          ), JSON_ARRAY()
+        ) AS comments
+
+      FROM posts
+      JOIN users ON posts.user_id = users.id
+
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS count FROM likes GROUP BY post_id
+      ) AS like_count ON like_count.post_id = posts.id
+
+      LEFT JOIN likes AS user_likes ON user_likes.post_id = posts.id AND user_likes.user_id = ?
+
+      LEFT JOIN save_posts AS saved ON saved.post_id = posts.id AND saved.user_id = ?
+
+      LEFT JOIN comments ON comments.post_id = posts.id
+
+      WHERE posts.id = ?
+
+      GROUP BY posts.id, users.id, like_count.count
+    `;
+
+
+      const [results] = await db.query(query, [userId,userId, postId]);
+
+      if (!results.length) {
+        return res.status(404).json({ error: "Post not found" });
+      }
+
+      res.json(results[0]);
+    } catch (err) {
+      console.error("Fetch single post error:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 
@@ -236,7 +330,7 @@ module.exports = (io) => {
 
       cloudinaryResponse.data.pipe(res);
     } catch (err) {
-      console.error("Error streaming video:", err.message);
+      // console.error("Error streaming video:", err.message);
       res.status(500).send("Internal Server Error");
     }
   });
@@ -278,14 +372,21 @@ module.exports = (io) => {
     }
   });
 
+  router.get("/comments/fetch", async (req, res) => {
+    try {
+      const { post_id } = req.query;
 
-router.get("/comments/fetch", async (req, res) => {
-  try {
-    const { post_id } = req.query;
-
-    const sql = `
-      SELECT c.id AS comment_id, c.comment, c.likes, c.pinned, c.created_at,
-             u.id AS commenter_id, u.username AS commenter_username, u.profile_pic AS commenter_pic,
+      const sql = `
+      SELECT c.id AS comment_id, c.comment, c.likes, c.pinned, c.created_at,c.user_visibility,
+             u.id AS commenter_id,
+            CASE
+              WHEN c.user_visibility = 'anonymous' THEN 'anonymous'
+              ELSE u.username
+            END AS commenter_username,
+            CASE
+              WHEN c.user_visibility = 'anonymous' THEN NULL
+              ELSE u.profile_pic
+            END AS commenter_pic,
              c.parent_comment_id
       FROM comments c
       JOIN users u ON c.user_id = u.id
@@ -293,42 +394,43 @@ router.get("/comments/fetch", async (req, res) => {
       ORDER BY c.pinned DESC, c.likes DESC, c.created_at DESC;
     `;
 
-    const [rows] = await db.query(sql, [post_id]);
+      const [rows] = await db.query(sql, [post_id]);
 
-  
-    const commentMap = {};
-    rows.forEach(row => {
-      commentMap[row.comment_id] = { ...row, replies: [] };
-    });
+      const commentMap = {};
+      rows.forEach((row) => {
+        commentMap[row.comment_id] = { ...row, replies: [] };
+      });
 
-
-    const nestedComments = [];
-    rows.forEach(row => {
-      if (row.parent_comment_id) {
-        const parent = commentMap[row.parent_comment_id];
-        if (parent) {
-          parent.replies.push(commentMap[row.comment_id]);
+      const nestedComments = [];
+      rows.forEach((row) => {
+        if (row.parent_comment_id) {
+          const parent = commentMap[row.parent_comment_id];
+          if (parent) {
+            parent.replies.push(commentMap[row.comment_id]);
+          }
+        } else {
+          nestedComments.push(commentMap[row.comment_id]);
         }
-      } else {
-        nestedComments.push(commentMap[row.comment_id]);
-      }
-    });
+      });
 
-    res.json(nestedComments);
-  } catch (error) {
-    console.error("Error fetching comments:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
+      res.json(nestedComments);
+    } catch (error) {
+      console.error("Error fetching comments:", error);
+      res.status(500).json({ error: "Server error" });
+    }
+  });
 
   router.post("/comment/insert", async (req, res) => {
     try {
-      const { user_id, post_id, comment, parent_comment_id } = req.body;
+      const { user_id, post_id, comment, parent_comment_id ,user_visibility} = req.body;
+
+
+      const visibility = user_visibility === 'anonymous' ? 'anonymous' : 'public';
+
 
       const query = `
-      INSERT INTO comments (post_id, user_id, comment, parent_comment_id)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO comments (post_id, user_id, comment, parent_comment_id,user_visibility)
+      VALUES (?, ?, ?, ?,?)
     `;
 
       const [result] = await db.query(query, [
@@ -336,6 +438,7 @@ router.get("/comments/fetch", async (req, res) => {
         user_id,
         comment,
         parent_comment_id || null,
+        visibility
       ]);
 
       const newComment = {
@@ -346,6 +449,7 @@ router.get("/comments/fetch", async (req, res) => {
         likes: 0,
         pinned: false,
         parent_comment_id,
+        user_visibility,
         created_at: new Date(),
       };
 
@@ -506,6 +610,85 @@ router.get("/comments/fetch", async (req, res) => {
       res.json(results);
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete("/delete/:id/:userid", verifyToken, async (req, res) => {
+    const postId = req.params.id;
+    const userId = req.params.userid;
+
+    if (parseInt(req.user.id) !== parseInt(userId)) {
+      return res.status(401).json({ message: "Unauthorized!" });
+    }
+
+    const connection = await db.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [result] = await connection.query(
+        "SELECT image FROM posts WHERE id = ?",
+        [postId]
+      );
+
+      // console.log(result.length)
+      if (result.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Post not found" });
+      }
+
+      const mediaUrl = result[0].image;
+      if (mediaUrl) {
+        const publicId = getCloudinaryPublicId(mediaUrl, "post_media");
+        if (publicId) {
+          await deleteFromCloudinary(publicId);
+        }
+      }
+
+      await connection.query("DELETE FROM posts WHERE id = ?", [postId]);
+      await connection.commit();
+
+      res.status(200).json({ message: "Post and media deleted successfully!" });
+    } catch (error) {
+      await connection.rollback();
+      console.error("Error deleting post:", error);
+      res.status(500).json({ message: "Error deleting post" });
+    } finally {
+      connection.release();
+    }
+  });
+
+  router.post("/save/:postId", verifyToken, async (req, res) => {
+    const postId = parseInt(req.params.postId);
+    const userId = parseInt(req.body.userId);
+
+    if (!postId || !userId) {
+      return res.status(400).json({ message: "Invalid post or user ID." });
+    }
+
+    try {
+      // Check if the post is already saved
+      const [existing] = await db.query(
+        `SELECT id FROM save_posts WHERE user_id = ? AND post_id = ?`,
+        [userId, postId]
+      );
+
+      if (existing.length > 0) {
+        await db.query(
+          `DELETE FROM save_posts WHERE user_id = ? AND post_id = ?`,
+          [userId, postId]
+        );
+        return res.status(200).json({ message: "Post unsaved!", saved: false });
+      } else {
+        await db.query(
+          `INSERT INTO save_posts (user_id, post_id) VALUES (?, ?)`,
+          [userId, postId]
+        );
+        return res.status(200).json({ message: "Post saved!", saved: true });
+      }
+    } catch (err) {
+      console.error("Error toggling saved post:", err);
+      res.status(500).json({ message: "Failed to toggle saved post." });
     }
   });
 
