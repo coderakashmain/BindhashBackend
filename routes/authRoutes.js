@@ -6,8 +6,7 @@ const { verifyToken, newuserverify } = require("../middleware/authMiddleware");
 const { transporter } = require("../middleware/mailProvider");
 const crypto = require("crypto");
 require("dotenv").config();
-const dayjs = require('dayjs');
-
+const dayjs = require("dayjs");
 
 const router = express.Router();
 
@@ -196,8 +195,6 @@ module.exports = (io) => {
         "INSERT INTO users (email, username, password) VALUES (?, ?, ?)",
         [email, username, hashedPassword]
       );
-
-     
 
       const userId = result.insertId;
       const token = jwt.sign({ id: userId, email }, process.env.JWT_SECRET, {
@@ -439,77 +436,89 @@ module.exports = (io) => {
     }
   });
 
+  //forgatepassword
 
-  
-//forgatepassword
+  router.post("/forgot-password/sendotp", async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required!" });
 
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
 
+      const [results] = await connection.query(
+        "SELECT id FROM users WHERE email = ? ",
+        [email]
+      );
 
-
-router.post("/forgot-password/sendotp", async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: "Email is required!" });
-
-  const connection = await db.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    const otp = crypto.randomInt(100000, 999999).toString();
-    const otpExpires = new Date(Date.now() + 10 * 60000);
-    const now = new Date();
-    const today = dayjs().format('YYYY-MM-DD');
-
-    const [rows] = await connection.query(
-      "SELECT * FROM forgotpassword WHERE gmail = ?",
-      [email]
-    );
-
-    if (rows.length > 0) {
-      const user = rows[0];
-
-      // Check if user hit daily limit
-      if (user.otpDate && user.otpDate.toISOString().slice(0, 10) === today && user.otpCount >= 5) {
+      if (results.length === 0) {
         await connection.rollback();
-        return res.status(429).json({ error: "You’ve reached today’s OTP limit. Try again tomorrow." });
+        return res.status(404).json({ error: "User not Found" });
       }
 
-      // Check for 30s cooldown
-      const diffSeconds = (now - new Date(user.lastOtpTime)) / 1000;
-      if (diffSeconds < 30) {
-        await connection.rollback();
-        return res.status(429).json({
-          error: "OTP request too soon. Please wait before retrying.",
-          retryAfter: Math.ceil(30 - diffSeconds)
-        });
-      }
+      const otp = crypto.randomInt(100000, 999999).toString();
+      const otpExpires = new Date(Date.now() + 10 * 60000);
+      const now = new Date();
+      const today = dayjs().format("YYYY-MM-DD");
 
-    
-      let newCount = user.otpCount;
-      let newDate = user.otpDate;
-      if (user.otpDate.toISOString().slice(0, 10) !== today) {
-        newCount = 1;
-        newDate = today;
+      const [rows] = await connection.query(
+        "SELECT * FROM forgotpassword WHERE gmail = ?",
+        [email]
+      );
+
+      if (rows.length > 0) {
+        const user = rows[0];
+
+        // Check if user hit daily limit
+        if (
+          user.otpDate &&
+          user.otpDate.toISOString().slice(0, 10) === today &&
+          user.otpCount >= 5
+        ) {
+          await connection.rollback();
+          return res
+            .status(429)
+            .json({
+              error: "You’ve reached today’s OTP limit. Try again tomorrow.",
+            });
+        }
+
+        // Check for 30s cooldown
+        const diffSeconds = (now - new Date(user.lastOtpTime)) / 1000;
+        if (diffSeconds < 30) {
+          await connection.rollback();
+          return res.status(429).json({
+            error: "OTP request too soon. Please wait before retrying.",
+            retryAfter: Math.ceil(30 - diffSeconds),
+          });
+        }
+
+        let newCount = user.otpCount;
+        let newDate = user.otpDate;
+        if (user.otpDate.toISOString().slice(0, 10) !== today) {
+          newCount = 1;
+          newDate = today;
+        } else {
+          newCount += 1;
+        }
+
+        await connection.query(
+          "UPDATE forgotpassword SET otp = ?, otpExpires = ?, lastOtpTime = ?, otpCount = ?, otpDate = ? WHERE gmail = ?",
+          [otp, otpExpires, now, newCount, newDate, email]
+        );
       } else {
-        newCount += 1;
+        await connection.query(
+          "INSERT INTO forgotpassword (gmail, otp, otpExpires, lastOtpTime, otpCount, otpDate) VALUES (?, ?, ?, ?, ?, ?)",
+          [email, otp, otpExpires, now, 1, today]
+        );
       }
 
-      await connection.query(
-        "UPDATE forgotpassword SET otp = ?, otpExpires = ?, lastOtpTime = ?, otpCount = ?, otpDate = ? WHERE gmail = ?",
-        [otp, otpExpires, now, newCount, newDate, email]
-      );
-    } else {
-      await connection.query(
-        "INSERT INTO forgotpassword (gmail, otp, otpExpires, lastOtpTime, otpCount, otpDate) VALUES (?, ?, ?, ?, ?, ?)",
-        [email, otp, otpExpires, now, 1, today]
-      );
-    }
-
-    // Send OTP Email
-    const mailOptions = {
-      to: email,
-      from: process.env.EMAIL_USER,
-      subject: "Bindhash OTP for Resetting Password",
-      html: `
+      // Send OTP Email
+      const mailOptions = {
+        to: email,
+        from: process.env.EMAIL_USER,
+        subject: "Bindhash OTP for Resetting Password",
+        html: `
       <html>
       <body>
         <div style="background-color: #f0f0f0; padding: 20px;">
@@ -523,118 +532,120 @@ router.post("/forgot-password/sendotp", async (req, res) => {
         </div>
       </body>
       </html>
-      `
-    };
+      `,
+      };
 
-    await transporter.sendMail(mailOptions);
-    await connection.commit();
+      await transporter.sendMail(mailOptions);
+      await connection.commit();
 
-    return res.json({
-      success: true,
-      message: "OTP sent successfully!",
-      retryAfter: 30
-    });
+      return res.json({
+        success: true,
+        message: "OTP sent successfully!",
+        retryAfter: 30,
+      });
+    } catch (err) {
+      console.error("Forgot password OTP error:", err);
+      await connection.rollback();
+      return res.status(500).json({ error: "Internal Server Error" });
+    } finally {
+      if (connection) connection.release();
+    }
+  });
 
-  } catch (err) {
-    console.error("Forgot password OTP error:", err);
-    await connection.rollback();
-    return res.status(500).json({ error: "Internal Server Error" });
-  } finally {
-    if (connection) connection.release();
-  }
-});
+  router.post("/forgot-password/verify", async (req, res) => {
+    const { email, otp } = req.body;
 
-
-
-
-router.post("/forgot-password/verify", async (req, res) => {
-  const { email, otp } = req.body;
-
-  if (!email || !otp) {
-    return res.status(400).json({ error: "Email and OTP are required!" });
-  }
-
-  const connection = await db.getConnection();
-  try {
-    const [rows] = await connection.query(
-      "SELECT otp, otpExpires FROM forgotpassword WHERE gmail = ?",
-      [email]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "OTP not found. Please request again." });
+    if (!email || !otp) {
+      return res.status(400).json({ error: "Email and OTP are required!" });
     }
 
-    const userOtp = rows[0];
+    const connection = await db.getConnection();
+    try {
+      const [rows] = await connection.query(
+        "SELECT otp, otpExpires FROM forgotpassword WHERE gmail = ?",
+        [email]
+      );
 
-    const now = new Date();
-    const expires = new Date(userOtp.otpExpires);
+      if (rows.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "OTP not found. Please request again." });
+      }
 
-    if (now > expires) {
-      return res.status(410).json({ error: "OTP has expired. Please request again." });
+      const userOtp = rows[0];
+
+      const now = new Date();
+      const expires = new Date(userOtp.otpExpires);
+
+      if (now > expires) {
+        return res
+          .status(410)
+          .json({ error: "OTP has expired. Please request again." });
+      }
+
+      if (userOtp.otp !== otp) {
+        return res
+          .status(401)
+          .json({ error: "Invalid OTP. Please try again." });
+      }
+
+      return res.json({ success: true, message: "OTP verified successfully!" });
+    } catch (err) {
+      console.error("OTP verification error:", err);
+      return res.status(500).json({ error: "Internal Server Error" });
+    } finally {
+      if (connection) connection.release();
+    }
+  });
+
+  router.post("/forgot-password/reset", async (req, res) => {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res
+        .status(400)
+        .json({ error: "Email and new password are required!" });
     }
 
-    if (userOtp.otp !== otp) {
-      return res.status(401).json({ error: "Invalid OTP. Please try again." });
+    const connection = await db.getConnection();
+    try {
+      // Check if user exists
+      const [rows] = await connection.query(
+        "SELECT id FROM users WHERE email = ?",
+        [email]
+      );
+      if (rows.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "No user found with this email." });
+      }
+
+      // Hash new password
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+      // Update password
+      await connection.query("UPDATE users SET password = ? WHERE email = ?", [
+        hashedPassword,
+        email,
+      ]);
+
+      // Optional: clear OTP after password reset
+      await connection.query("DELETE FROM forgotpassword WHERE gmail = ?", [
+        email,
+      ]);
+
+      return res.json({
+        success: true,
+        message: "Password has been reset successfully!",
+      });
+    } catch (err) {
+      console.error("Password reset error:", err);
+      return res.status(500).json({ error: "Internal Server Error" });
+    } finally {
+      if (connection) connection.release();
     }
-
-    
-    return res.json({ success: true, message: "OTP verified successfully!" });
-
-  } catch (err) {
-    console.error("OTP verification error:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
-  } finally {
-    if (connection) connection.release();
-  }
-});
-
-
-router.post("/forgot-password/reset", async (req, res) => {
-  const { email, newPassword } = req.body;
-
-  if (!email || !newPassword) {
-    return res.status(400).json({ error: "Email and new password are required!" });
-  }
-
-  const connection = await db.getConnection();
-  try {
-    // Check if user exists
-    const [rows] = await connection.query("SELECT id FROM users WHERE email = ?", [email]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "No user found with this email." });
-    }
-
-    // Hash new password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    // Update password
-    await connection.query(
-      "UPDATE users SET password = ? WHERE email = ?",
-      [hashedPassword, email]
-    );
-
-    // Optional: clear OTP after password reset
-    await connection.query(
-      "DELETE FROM forgotpassword WHERE gmail = ?",
-      [email]
-    );
-
-    return res.json({ success: true, message: "Password has been reset successfully!" });
-
-  } catch (err) {
-    console.error("Password reset error:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
-  } finally {
-    if (connection) connection.release();
-  }
-});
-
-
-
+  });
 
   return router;
 };
-
-
