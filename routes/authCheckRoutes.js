@@ -35,11 +35,18 @@ router.get("/check", verifyToken,async (req, res) => {
       c.created_at,
       
       CASE 
-        WHEN c.visibility  = 'anonymous' THEN 'Anonymous'
-        ELSE c.fullname
+      WHEN c.visibility  = 'anonymous' THEN 'Anonymous'
+      ELSE c.fullname
       END AS fullname,
+      
+      c.visibility ,
+        (
+      SELECT COUNT(*) 
+      FROM posts 
+      WHERE posts.user_id = c.id
+    ) AS total_post
 
-      c.visibility 
+
 
       FROM users as c WHERE id = ? 
     `

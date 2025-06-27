@@ -189,7 +189,7 @@ module.exports = (io) => {
       const [resultsdata] = await db.execute(sql, params);
 
       const results = resultsdata.map((item) => {
-        // Only clean if it's a post and image exists
+      
         if (item.image) {
           const isImage =
             /\.(jpg|jpeg|png|gif)$/i.test(item.image) ||
@@ -460,63 +460,7 @@ module.exports = (io) => {
     }
   });
 
-  // router.get("/comments/:post_id", async (req, res) => {
-  //   try {
-  //     const { post_id } = req.params;
 
-  //     // 1️⃣ Fetch top-level comments (parent_comment_id = NULL)
-  //     const commentQuery = `
-  //       SELECT c.*,
-  //              u.username AS commenter_username,
-  //              u.profile_pic AS commenter_pic
-  //       FROM comments c
-  //       JOIN users u ON c.user_id = u.id
-  //       WHERE c.post_id = ? AND c.parent_comment_id IS NULL
-  //       ORDER BY c.pinned DESC, c.likes DESC, c.created_at DESC;
-  //     `;
-
-  //     // 2️⃣ Fetch all replies (parent_comment_id IS NOT NULL)
-  //     const repliesQuery = `
-  //       SELECT c.*,
-  //              u.username AS commenter_username,
-  //              u.profile_pic AS commenter_pic
-  //       FROM comments c
-  //       JOIN users u ON c.user_id = u.id
-  //       WHERE c.post_id = ? AND c.parent_comment_id IS NOT NULL
-  //       ORDER BY c.created_at ASC;
-  //     `;
-
-  //     db.query(commentQuery, [post_id], (err, comments) => {
-  //       if (err) {
-  //         console.error("Error fetching comments:", err);
-  //         return res.status(500).json({ error: "Database error" });
-  //       }
-  //       console.log(comments)
-  //       db.query(repliesQuery, [post_id], (err, replies) => {
-  //         if (err) {
-  //           console.error("Error fetching replies:", err);
-  //           return res.status(500).json({ error: "Database error" });
-  //         }
-
-  //         // Map replies to their respective parent comments
-  //         const commentMap = new Map();
-  //         comments.forEach(comment => commentMap.set(comment.id, { ...comment, replies: [] }));
-
-  //         replies.forEach(reply => {
-  //           if (commentMap.has(reply.parent_comment_id)) {
-  //             commentMap.get(reply.parent_comment_id).replies.push(reply);
-  //           }
-  //         });
-
-  //         res.json(Array.from(commentMap.values())); // Convert map to array and send response
-  //       });
-  //     });
-
-  //   } catch (error) {
-  //     console.error("Server error:", error);
-  //     res.status(500).json({ error: "Server error" });
-  //   }
-  // });
 
   router.post("/comments/like", async (req, res) => {
     try {
@@ -692,5 +636,77 @@ module.exports = (io) => {
     }
   });
 
+//Fetch User Post
+
+
+router.get('/fetchuserpost', async (req, res) => {
+  const { userId, limit = 10, offset = 0 } = req.query;
+
+  try {
+    const sql = `
+      SELECT 
+        'post' AS type,
+        posts.id AS post_id, 
+        NULL AS poll_id,
+        posts.content, 
+        posts.title, 
+        posts.category, 
+        posts.tag, 
+        posts.image, 
+        posts.media_type,
+        posts.created_at, 
+        posts.visibility AS post_visibility,
+        CASE WHEN posts.visibility = 'anonymous' THEN 'anonymous' ELSE users.username END AS post_username,
+        CASE WHEN posts.visibility = 'anonymous' THEN NULL ELSE users.profile_pic END AS post_user_pic,
+        users.id AS post_user_id,
+        (SELECT COUNT(*) FROM posts WHERE user_id = users.id) AS post_count,
+        IFNULL(like_count.count, 0) AS like_count,
+        IF(MAX(user_likes.user_id IS NOT NULL), 1, 0) AS is_liked,
+        IF(MAX(user_saves.user_id IS NOT NULL), 1, 0) AS is_saved,
+        COALESCE(
+          JSON_ARRAYAGG(
+            CASE 
+              WHEN comments.id IS NOT NULL THEN JSON_OBJECT(
+                'parent_comment_id', comments.parent_comment_id
+              )
+              ELSE JSON_OBJECT()
+            END
+          ), JSON_ARRAY()
+        ) AS comments
+
+      FROM posts
+      JOIN users ON posts.user_id = users.id
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS count FROM likes GROUP BY post_id
+      ) AS like_count ON like_count.post_id = posts.id
+      LEFT JOIN likes AS user_likes ON user_likes.post_id = posts.id AND user_likes.user_id = ?
+      LEFT JOIN save_posts AS user_saves ON user_saves.post_id = posts.id AND user_saves.user_id = ?
+      LEFT JOIN comments ON comments.post_id = posts.id
+      LEFT JOIN users AS comment_users ON comments.user_id = comment_users.id
+
+      WHERE posts.user_id = ?
+      GROUP BY posts.id, users.id, like_count.count
+      ORDER BY (like_count.count / TIMESTAMPDIFF(MINUTE, posts.created_at, NOW())) DESC
+      LIMIT ? OFFSET ?;
+    `;
+
+    const [rows] = await db.query(sql, [userId, userId, userId, parseInt(limit), parseInt(offset)]);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching user posts:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+
+
+
+
   return router;
 };
+
+
+
+
+

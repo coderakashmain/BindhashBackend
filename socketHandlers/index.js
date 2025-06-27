@@ -4,6 +4,7 @@ const handleChatEvents = require('./userHandlers');
 const handleRoomEvents = require('./roomHandlers')
 const handleRandomChatEvents = require('./randomChatHandlers')
 const handleModeChangeEvents = require('./modeChangeHandlers')
+const handleGolbarChatEvents = require('./GlobalRandomChatHandlers')
 
 module.exports =(io)=> {
     io.on('connection',(socket)=>{
@@ -15,6 +16,7 @@ module.exports =(io)=> {
         handleRoomEvents(io,socket);
         handleRandomChatEvents(io,socket);
         handleModeChangeEvents(io,socket);
+        handleGolbarChatEvents(io,socket);
 
 
         socket.on('disconnect', ()=>{
