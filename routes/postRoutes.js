@@ -178,7 +178,7 @@ module.exports = (io) => {
 
         `;
 
-      const params = [userId, userId, userId,userId];
+      const params = [userId, userId, userId, userId];
 
       // Debugging - Check if parameters are valid
 
@@ -189,7 +189,6 @@ module.exports = (io) => {
       const [resultsdata] = await db.execute(sql, params);
 
       const results = resultsdata.map((item) => {
-      
         if (item.image) {
           const isImage =
             /\.(jpg|jpeg|png|gif)$/i.test(item.image) ||
@@ -282,8 +281,7 @@ module.exports = (io) => {
       GROUP BY posts.id, users.id, like_count.count
     `;
 
-
-      const [results] = await db.query(query, [userId,userId, postId]);
+      const [results] = await db.query(query, [userId, userId, postId]);
 
       if (!results.length) {
         return res.status(404).json({ error: "Post not found" });
@@ -422,11 +420,11 @@ module.exports = (io) => {
 
   router.post("/comment/insert", async (req, res) => {
     try {
-      const { user_id, post_id, comment, parent_comment_id ,user_visibility} = req.body;
+      const { user_id, post_id, comment, parent_comment_id, user_visibility } =
+        req.body;
 
-
-      const visibility = user_visibility === 'anonymous' ? 'anonymous' : 'public';
-
+      const visibility =
+        user_visibility === "anonymous" ? "anonymous" : "public";
 
       const query = `
       INSERT INTO comments (post_id, user_id, comment, parent_comment_id,user_visibility)
@@ -438,7 +436,7 @@ module.exports = (io) => {
         user_id,
         comment,
         parent_comment_id || null,
-        visibility
+        visibility,
       ]);
 
       const newComment = {
@@ -459,8 +457,6 @@ module.exports = (io) => {
       res.status(500).json({ error: "Server error" });
     }
   });
-
-
 
   router.post("/comments/like", async (req, res) => {
     try {
@@ -575,23 +571,29 @@ module.exports = (io) => {
         [postId]
       );
 
-      // console.log(result.length)
       if (result.length === 0) {
         await connection.rollback();
         return res.status(404).json({ message: "Post not found" });
       }
 
       const mediaUrl = result[0].image;
+
       if (mediaUrl) {
-        const publicId = getCloudinaryPublicId(mediaUrl, "post_media");
+        const { publicId, resourceType } = getCloudinaryPublicId(mediaUrl);
+
         if (publicId) {
-          await deleteFromCloudinary(publicId);
+          try {
+            await deleteFromCloudinary(publicId, resourceType);
+          } catch (err) {
+            await connection.rollback();
+            console.error(err,'Error deleting post!')
+            res.status(500).json({ message: "Error deleting post" });
+          }
         }
       }
 
       await connection.query("DELETE FROM posts WHERE id = ?", [postId]);
       await connection.commit();
-
       res.status(200).json({ message: "Post and media deleted successfully!" });
     } catch (error) {
       await connection.rollback();
@@ -636,14 +638,13 @@ module.exports = (io) => {
     }
   });
 
-//Fetch User Post
+  //Fetch User Post
 
+  router.get("/fetchuserpost", async (req, res) => {
+    const { userId, limit = 10, offset = 0 } = req.query;
 
-router.get('/fetchuserpost', async (req, res) => {
-  const { userId, limit = 10, offset = 0 } = req.query;
-
-  try {
-    const sql = `
+    try {
+      const sql = `
       SELECT 
         'post' AS type,
         posts.id AS post_id, 
@@ -690,23 +691,19 @@ router.get('/fetchuserpost', async (req, res) => {
       LIMIT ? OFFSET ?;
     `;
 
-    const [rows] = await db.query(sql, [userId, userId, userId, parseInt(limit), parseInt(offset)]);
-    res.json(rows);
-  } catch (error) {
-    console.error("Error fetching user posts:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-
-
-
-
+      const [rows] = await db.query(sql, [
+        userId,
+        userId,
+        userId,
+        parseInt(limit),
+        parseInt(offset),
+      ]);
+      res.json(rows);
+    } catch (error) {
+      console.error("Error fetching user posts:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
   return router;
 };
-
-
-
-
-

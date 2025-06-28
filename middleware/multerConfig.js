@@ -64,10 +64,11 @@ const pollStorage = new CloudinaryStorage({
   }),
 });
 
-const deleteFromCloudinary = async (publicId) => {
+const deleteFromCloudinary = async (publicId,resourceType) => {
+  console.log(publicId ,"and ", resourceType)
+
     try {
-        await cloudinary.uploader.destroy(publicId, { resource_type: "auto" });
-        console.log(`Deleted: ${publicId}`);
+        await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
     } catch (error) {
         console.error("Cloudinary delete error:", error);
     }
@@ -75,17 +76,25 @@ const deleteFromCloudinary = async (publicId) => {
 
 
 const getCloudinaryPublicId = (url, folder = "post_media") => {
-    try {
-        const parts = url.split("/");
-        const filename = parts.pop(); 
-        const [publicId] = filename.split(".");
+  try {
+    const parts = url.split("/");
+    const filename = parts.pop(); // e.g., abc123.jpg or xyz456.mp4
+    const [publicId, extension] = filename.split(".");
 
-        return `${folder}/${publicId}`;
-    } catch (error) {
-        console.error("Error extracting publicId:", error);
-        return null;
-    }
+    const resourceType = ["mp4", "webm", "mov"].includes(extension.toLowerCase())
+      ? "video"
+      : "image";
+
+    return {
+      publicId: `${folder}/${publicId}`,
+      resourceType,
+    };
+  } catch (error) {
+    console.error("Error extracting publicId and resourceType:", error);
+    return null;
+  }
 };
+
 
 
 const profileUpload = multer({ storage: profileStorage });
