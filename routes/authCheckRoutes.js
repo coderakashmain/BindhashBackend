@@ -1,5 +1,6 @@
 const express = require("express");
 const {verifyToken} = require('../middleware/authMiddleware')
+const axios = require("axios");
 
 require("dotenv").config();
 const db = require("../config/db");
@@ -77,6 +78,43 @@ const user = {
     return res.status(500).json({ error: "Database error" });
   }
 });
+
+
+
+router.post("/recaptcha/verify-turnstile", async (req, res) => {
+  try {
+    const token = req.body.token; 
+    if (!token) {
+      return res.status(400).json({ success: false, error: "Token is missing" });
+    }
+
+    const response = await axios.post(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      new URLSearchParams({
+        secret: process.env.CLOUDFLARE_SECRET_KEY,
+        response: token,
+        remoteip: req.ip, 
+      }),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    if (response.data.success) {
+      req.session.isVerified = true; 
+      return res.json({ success: true });
+    } else {
+      console.warn("Turnstile verification failed:", response.data["error-codes"]);
+      return res.status(400).json({ success: false, error: "Invalid CAPTCHA" });
+    }
+  } catch (error) {
+    console.error("Turnstile server error:", error.message);
+    return res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
 
 
 module.exports = router;

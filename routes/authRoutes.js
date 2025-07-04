@@ -6,6 +6,8 @@ const { verifyToken, newuserverify } = require("../middleware/authMiddleware");
 const { transporter } = require("../middleware/mailProvider");
 const crypto = require("crypto");
 require("dotenv").config();
+const { OAuth2Client } = require("google-auth-library");
+const client = new OAuth2Client(process.env.CLIENT_ID);
 const dayjs = require("dayjs");
 
 const router = express.Router();
@@ -358,9 +360,9 @@ module.exports = (io) => {
       const token = jwt.sign(
         {
           id: matchedUser.id,
-          username: matchedUser.username,
-          fullname: matchedUser.fullname,
-          profile_pic: matchedUser.profile_pic,
+          // username: matchedUser.username,
+          // fullname: matchedUser.fullname,
+          // profile_pic: matchedUser.profile_pic,
         },
         process.env.JWT_SECRET,
         { expiresIn: "7d" }
@@ -387,6 +389,77 @@ module.exports = (io) => {
       return res.status(500).json({ error: err.message });
     }
   });
+  //gogle Login
+
+ router.post("/google", async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ message: "No token provided" });
+  }
+
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { name, email, picture, sub } = payload;
+
+    const [results] = await db.query(
+      "SELECT * FROM users WHERE google_id = ? OR email = ?",
+      [sub, email]
+    );
+
+    let user = results[0];
+
+    // If user not found, insert
+    if (!user) {
+      const [insertResult] = await db.query(
+        "INSERT INTO users (google_id, username, email, profile_pic) VALUES (?, ?, ?, ?)",
+        [sub, name, email, picture]
+      );
+
+      const userId = insertResult.insertId;
+
+      user = {
+        id: userId,
+        username: name,
+        email: email,
+        fullname: "",
+        profile_pic: picture,
+      };
+    }
+
+    const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    res.cookie("usertoken", jwtToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+    });
+
+    return res.json({
+      success: true,
+      message: "Login successful",
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        fullname: user.fullname,
+        profile_pic: user.profile_pic,
+      },
+    });
+  } catch (err) {
+    console.error("Google login error:", err);
+    return res.status(401).json({ message: "Invalid token or error verifying" });
+  }
+});
+
 
   router.post("/logout", (req, res) => {
     res.clearCookie("usertoken");
@@ -476,11 +549,9 @@ module.exports = (io) => {
           user.otpCount >= 5
         ) {
           await connection.rollback();
-          return res
-            .status(429)
-            .json({
-              error: "You’ve reached today’s OTP limit. Try again tomorrow.",
-            });
+          return res.status(429).json({
+            error: "You’ve reached today’s OTP limit. Try again tomorrow.",
+          });
         }
 
         // Check for 30s cooldown
