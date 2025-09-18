@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const db = require("./config/db");
+
 const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const authCheckRoutes = require("./routes/authCheckRoutes");
@@ -16,6 +17,7 @@ const reportsRouter = require("./routes/reportsRoutes");
 const feedbackRoutes = require("./routes/authFeedback");
 
 const path = require("path");
+const fs = require('fs');
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
 
@@ -46,8 +48,9 @@ const io = new Server(server, {
   },
 });
 
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+
+
+const PORT = process.env.PORT || 3000;
 
 app.use(
   cors({
@@ -63,7 +66,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "default_secret_key",
+    secret: process.env.SESSION_SECRET ,
     resave: false,
     saveUninitialized: true,
     cookie: {
@@ -96,34 +99,6 @@ app.set("trust proxy", 1);
 
 
 
-webPush.setVapidDetails(
-  "mailto:ab791235@gmail.com",
-  VAPID_PUBLIC_KEY,
-  VAPID_PRIVATE_KEY
-);
 
-function sendWebPushNotification(userId, message) {
-  const subscription = userSubscriptions[userId];
-  if (!subscription) return;
 
-  const payload = JSON.stringify({
-    title: "New Message",
-    body: message,
-    icon: "/icon.png",
-  });
-
-  webPush
-    .sendNotification(subscription, payload)
-    .catch((err) => console.error(err));
-}
-
-let userSubscriptions = {};
-
-app.post("/subscribe", (req, res) => {
-  const { userId, subscription } = req.body;
-  userSubscriptions[userId] = subscription;
-  res.json({ success: true });
-});
-
-const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
