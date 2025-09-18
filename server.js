@@ -38,6 +38,7 @@ const io = new Server(server, {
     const allowedOrigins = [
       "https://bindhash.xyz",
       "https://www.bindhash.xyz",
+       "https://api.bindhash.xyz",
       "http://localhost:5173",
     ];
     if (!origin || allowedOrigins.includes(origin)) {
